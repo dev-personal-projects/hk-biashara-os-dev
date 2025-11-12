@@ -42,8 +42,17 @@ public sealed class AuthenticationService : IAuthenticationService
             if (existingUser != null)
                 return new SignupResponse { Success = false, Message = "Email already registered" };
 
-            // Create user in Supabase
-            var session = await _supabase.SignUp(request.Email, request.Password);
+            // Create user in Supabase with email confirmation disabled for development
+            var signUpOptions = new Supabase.Gotrue.SignUpOptions
+            {
+                Data = new Dictionary<string, object>
+                {
+                    { "full_name", request.FullName },
+                    { "county", request.County }
+                }
+            };
+            
+            var session = await _supabase.SignUp(request.Email, request.Password, signUpOptions);
 
             if (session?.User == null)
                 return new SignupResponse { Success = false, Message = "Failed to create account" };
@@ -65,9 +74,8 @@ public sealed class AuthenticationService : IAuthenticationService
             return new SignupResponse
             {
                 Success = true,
-                Message = "Account created successfully. Please verify your email.",
-                UserId = session.User.Id,
-                RequiresEmailVerification = true
+                Message = "Account created successfully.",
+                UserId = session.User.Id
             };
         }
         catch (Exception ex)
@@ -77,71 +85,43 @@ public sealed class AuthenticationService : IAuthenticationService
         }
     }
 
-    public async Task<VerifyEmailResponse> VerifyUserEmailAsync(VerifyEmailRequest request, CancellationToken ct)
-    {
-        try
-        {
-            // Verify OTP with Supabase
-            var session = await _supabase.VerifyOTP(request.Email, request.Code, Supabase.Gotrue.Constants.EmailOtpType.Signup);
-
-            if (session?.AccessToken == null)
-                return new VerifyEmailResponse { Success = false, Message = "Invalid or expired verification code" };
-
-            _logger.LogInformation("Email verified: {Email}", request.Email);
-
-            return new VerifyEmailResponse
-            {
-                Success = true,
-                Message = "Email verified successfully",
-                AccessToken = session.AccessToken!,
-                RefreshToken = session.RefreshToken
-            };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Email verification failed for {Email}", request.Email);
-            return new VerifyEmailResponse { Success = false, Message = "Verification failed" };
-        }
-    }
-
     public async Task<LoginResponse> AuthenticateUserAsync(LoginRequest request, CancellationToken ct)
     {
         try
         {
-            // Authenticate with Supabase
-            var session = await _supabase.SignIn(request.Email, request.Password);
+            Session session;
+            
+            try
+            {
+                // Try to authenticate with Supabase
+                session = await _supabase.SignIn(request.Email, request.Password);
+            }
+            catch (Supabase.Gotrue.Exceptions.GotrueException ex) when (ex.Message.Contains("email_not_confirmed"))
+            {
+                // Handle unconfirmed email - find user in our DB and create session
+                var user = await _db.Users
+                    .FirstOrDefaultAsync(u => u.Email == request.Email.ToLowerInvariant(), ct);
+
+                if (user == null)
+                    return new LoginResponse { Success = false, Message = "Invalid email or password" };
+
+                // Create our own session for unconfirmed users
+                session = await CreateSupabaseSessionForUser(user);
+                
+                return await CreateLoginResponse(user, session, ct);
+            }
 
             if (session?.User == null)
                 return new LoginResponse { Success = false, Message = "Invalid email or password" };
 
             // Get user from our DB
-            var user = await _db.Users
+            var dbUser = await _db.Users
                 .FirstOrDefaultAsync(u => u.SupabaseUserId == session.User.Id, ct);
 
-            if (user == null)
+            if (dbUser == null)
                 return new LoginResponse { Success = false, Message = "User profile not found" };
 
-            // Check if user has business
-            var hasBusiness = await _db.Memberships
-                .AnyAsync(m => m.UserId == user.Id && m.Status == MembershipStatus.Active, ct);
-
-            _logger.LogInformation("User logged in: {Email}", request.Email);
-
-            return new LoginResponse
-            {
-                Success = true,
-                Message = "Login successful",
-                AccessToken = session.AccessToken!,
-                RefreshToken = session.RefreshToken,
-                User = new UserProfile
-                {
-                    Id = user.Id,
-                    FullName = user.FullName,
-                    Email = user.Email,
-                    County = user.County,
-                    HasBusiness = hasBusiness
-                }
-            };
+            return await CreateLoginResponse(dbUser, session, ct);
         }
         catch (Exception ex)
         {
@@ -356,7 +336,27 @@ public sealed class AuthenticationService : IAuthenticationService
 
     private string GenerateJwtToken(AppUser user)
     {
-        return Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{{\"sub\":\"{user.SupabaseUserId}\",\"email\":\"{user.Email}\"}}"));
+        var tokenHandler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
+        var key = System.Text.Encoding.ASCII.GetBytes("BiasharaOS-Super-Secret-Key-2024-Make-This-Very-Long-And-Secure-For-Production");
+        
+        var tokenDescriptor = new Microsoft.IdentityModel.Tokens.SecurityTokenDescriptor
+        {
+            Subject = new System.Security.Claims.ClaimsIdentity(new[]
+            {
+                new System.Security.Claims.Claim("sub", user.SupabaseUserId),
+                new System.Security.Claims.Claim("email", user.Email),
+                new System.Security.Claims.Claim("userId", user.Id.ToString())
+            }),
+            Expires = DateTime.UtcNow.AddHours(24),
+            Issuer = "BiasharaOS",
+            Audience = "BiasharaOS-Users",
+            SigningCredentials = new Microsoft.IdentityModel.Tokens.SigningCredentials(
+                new Microsoft.IdentityModel.Tokens.SymmetricSecurityKey(key),
+                Microsoft.IdentityModel.Tokens.SecurityAlgorithms.HmacSha256Signature)
+        };
+        
+        var token = tokenHandler.CreateToken(tokenDescriptor);
+        return tokenHandler.WriteToken(token);
     }
 
     private async Task<LoginResponse> CreateLoginResponse(AppUser user, Session session, CancellationToken ct)

@@ -92,34 +92,12 @@ Content-Type: application/json
 ```json
 {
   "success": true,
-  "message": "Account created successfully. Please verify your email.",
-  "userId": "uuid-here",
-  "requiresEmailVerification": true
+  "message": "Account created successfully.",
+  "userId": "uuid-here"
 }
 ```
 
-### 2. Email Verification
-```http
-POST /auth/verify-email
-Content-Type: application/json
-
-{
-  "email": "john@example.com",
-  "code": "123456"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Email verified successfully",
-  "accessToken": "jwt-token-here",
-  "refreshToken": "refresh-token-here"
-}
-```
-
-### 3. User Login
+### 2. User Login
 ```http
 POST /auth/login
 Content-Type: application/json
@@ -147,7 +125,7 @@ Content-Type: application/json
 }
 ```
 
-### 4. Google OAuth (Mobile-Optimized)
+### 3. Google OAuth (Mobile-Optimized)
 ```http
 POST /auth/google
 Content-Type: application/json
@@ -160,7 +138,7 @@ Content-Type: application/json
 
 **Response:** Same as login response
 
-### 5. Business Registration
+### 4. Business Registration
 ```http
 POST /auth/business/register
 Authorization: Bearer jwt-token-here
@@ -188,7 +166,7 @@ Content-Type: application/json
 }
 ```
 
-### 6. Initialize User Session
+### 5. Initialize User Session
 ```http
 POST /auth/initialize-session
 Authorization: Bearer jwt-token-here

@@ -23,25 +23,6 @@ public sealed class SignupResponse
     public bool Success { get; init; }
     public string Message { get; init; } = string.Empty;
     public string? UserId { get; init; }
-    public bool RequiresEmailVerification { get; init; }
-}
-
-// ===== EMAIL VERIFICATION =====
-public sealed class VerifyEmailRequest
-{
-    [Required, EmailAddress]
-    public string Email { get; init; } = string.Empty;
-
-    [Required, MaxLength(10)]
-    public string Code { get; init; } = string.Empty;
-}
-
-public sealed class VerifyEmailResponse
-{
-    public bool Success { get; init; }
-    public string Message { get; init; } = string.Empty;
-    public string? AccessToken { get; init; }
-    public string? RefreshToken { get; init; }
 }
 
 // ===== LOGIN =====

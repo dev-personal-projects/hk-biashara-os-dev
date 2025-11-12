@@ -1,13 +1,13 @@
 {
   "info": {
-    "name": "BiasharaOS API - Simplified",
-    "description": "Simplified Authentication and Business Management API",
+    "name": "BiasharaOS API - No Email Verification",
+    "description": "Simplified Authentication API without email verification",
     "version": "1.0.0"
   },
   "variable": [
     {
       "key": "baseUrl",
-      "value": "https://localhost:7000/api",
+      "value": "http://localhost:5052/api",
       "type": "string"
     },
     {
@@ -38,27 +38,6 @@
               "raw": "{{baseUrl}}/auth/signup",
               "host": ["{{baseUrl}}"],
               "path": ["auth", "signup"]
-            }
-          }
-        },
-        {
-          "name": "Verify Email",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email\": \"john@example.com\",\n  \"code\": \"123456\"\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/auth/verify-email",
-              "host": ["{{baseUrl}}"],
-              "path": ["auth", "verify-email"]
             }
           }
         },

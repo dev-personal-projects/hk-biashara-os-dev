@@ -35,20 +35,6 @@ public class AuthController : ControllerBase
         return Ok(result);
     }
 
-    [HttpPost("verify-email")]
-    public async Task<ActionResult<VerifyEmailResponse>> VerifyEmail([FromBody] VerifyEmailRequest request, CancellationToken ct)
-    {
-        if (!ModelState.IsValid)
-            return BadRequest(new VerifyEmailResponse { Success = false, Message = "Invalid request data" });
-
-        var result = await _authenticationService.VerifyUserEmailAsync(request, ct);
-
-        if (!result.Success)
-            return BadRequest(result);
-
-        return Ok(result);
-    }
-
     [HttpPost("login")]
     public async Task<ActionResult<LoginResponse>> Login([FromBody] LoginRequest request, CancellationToken ct)
     {
