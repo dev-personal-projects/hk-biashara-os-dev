@@ -15,9 +15,6 @@ public sealed class AppUserConfig : Microsoft.EntityFrameworkCore.IEntityTypeCon
         b.Property(x => x.Email).IsRequired().HasMaxLength(256);
         b.Property(x => x.County).IsRequired().HasMaxLength(64);
 
-        b.Property(x => x.Latitude).HasColumnType("decimal(9,6)");
-        b.Property(x => x.Longitude).HasColumnType("decimal(9,6)");
-
         b.HasIndex(x => x.SupabaseUserId).IsUnique();
         b.HasIndex(x => x.Email).IsUnique();
 

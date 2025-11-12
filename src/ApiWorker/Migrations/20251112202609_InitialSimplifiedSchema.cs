@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace ApiWorker.Migrations
 {
     /// <inheritdoc />
-    public partial class InitialCreate : Migration
+    public partial class InitialSimplifiedSchema : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -20,8 +20,6 @@ namespace ApiWorker.Migrations
                     FullName = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
                     Email = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: false),
                     County = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: false),
-                    Latitude = table.Column<decimal>(type: "decimal(9,6)", nullable: true),
-                    Longitude = table.Column<decimal>(type: "decimal(9,6)", nullable: true),
                     CreatedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false),
                     UpdatedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false),
                     DeletedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: true),
@@ -30,33 +28,6 @@ namespace ApiWorker.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_users", x => x.Id);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "device_sessions",
-                columns: table => new
-                {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    UserId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    DeviceId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
-                    Platform = table.Column<string>(type: "nvarchar(16)", maxLength: 16, nullable: false),
-                    RegisteredAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false),
-                    LastSeenAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: true),
-                    RevokedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: true),
-                    CreatedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false),
-                    UpdatedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false),
-                    DeletedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: true),
-                    RowVersion = table.Column<byte[]>(type: "rowversion", rowVersion: true, nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_device_sessions", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_device_sessions_users_UserId",
-                        column: x => x.UserId,
-                        principalTable: "users",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
                 });
 
             migrationBuilder.CreateTable(
@@ -156,12 +127,6 @@ namespace ApiWorker.Migrations
                 column: "Name");
 
             migrationBuilder.CreateIndex(
-                name: "IX_device_sessions_UserId_DeviceId",
-                table: "device_sessions",
-                columns: new[] { "UserId", "DeviceId" },
-                unique: true);
-
-            migrationBuilder.CreateIndex(
                 name: "IX_memberships_BusinessId",
                 table: "memberships",
                 column: "BusinessId");
@@ -210,9 +175,6 @@ namespace ApiWorker.Migrations
             migrationBuilder.DropForeignKey(
                 name: "FK_businesses_templates_DefaultTemplateId",
                 table: "businesses");
-
-            migrationBuilder.DropTable(
-                name: "device_sessions");
 
             migrationBuilder.DropTable(
                 name: "memberships");

@@ -25,8 +25,6 @@ public sealed class AppUser : Entity
     }
 
     public string County { get; set; } = string.Empty;
-    public decimal? Latitude { get; set; }  // decimal(9,6)
-    public decimal? Longitude { get; set; } // decimal(9,6)
 
 
     //nav

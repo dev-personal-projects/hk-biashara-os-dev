@@ -1,6 +1,5 @@
 using System.Reflection;
 using Microsoft.EntityFrameworkCore;
-using ApiWorker.Entities;
 using ApiWorker.Authentication.Entities;
 
 namespace ApiWorker.Data;
@@ -14,7 +13,7 @@ public sealed class ApplicationDbContext : DbContext
     public DbSet<Business> Businesses => Set<Business>();
     public DbSet<Membership> Memberships => Set<Membership>();
     public DbSet<Template> Templates => Set<Template>();
-    public DbSet<DeviceSession> DeviceSessions => Set<DeviceSession>();
+
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

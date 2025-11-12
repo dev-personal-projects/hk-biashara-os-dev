@@ -99,6 +99,18 @@ case "$1" in
         fi
         ;;
     
+    "clean")
+        log_warn "This will remove all migration files. Continue? (y/N)"
+        read -r response
+        if [[ "$response" =~ ^[Yy]$ ]]; then
+            log_info "Removing all migration files..."
+            rm -rf Migrations/*
+            log_info "All migrations removed. Run 'add' to create initial migration."
+        else
+            log_info "Operation cancelled"
+        fi
+        ;;
+    
     *)
         echo "Entity Framework Migration Helper"
         echo ""
@@ -111,6 +123,7 @@ case "$1" in
         echo "  list           List all migrations"
         echo "  reset <name>   Roll back to specific migration"
         echo "  fresh          Drop and recreate database (destructive)"
+        echo "  clean          Remove all migration files (destructive)"
         echo ""
         echo "Examples:"
         echo "  ./migrate.sh add AddUserTable"
