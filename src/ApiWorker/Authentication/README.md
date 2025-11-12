@@ -46,3 +46,20 @@ These POCOs mirror the minimal SQL schema used during auth/bootstrap and onboard
 - **Enums** — Role, MembershipStatus, DocumentType.
 
 No persistence attributes or navigation properties yet. EF Core configuration will live in `Data/` later.
+
+
+# Models (Authentication)
+
+- **ValueObjects/**
+  - `GeoPoint` – immutable lat/long with range checks.
+  - `CountyCode` – Kenya counties whitelist; normalizes for display.
+
+- **ReadModels/**
+  - `AuthUserSummary` – minimal user profile for the client cache.
+  - `BusinessSummary` – tenant picker / header display.
+  - `AuthBootstrapResult` – unified payload after login/refresh.
+
+Notes:
+- No EF attributes here; these are framework-agnostic shapes.
+- Controllers/Services can map from Entities → ReadModels.
+- Keep them small and stable to avoid breaking the mobile app.
