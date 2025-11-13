@@ -20,23 +20,24 @@ public sealed class CurrentUserMiddleware
     {
         if (context.User.Identity?.IsAuthenticated == true)
         {
-            var supabaseUserId = context.User.FindFirst("sub")?.Value;
+            var userIdClaim = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value 
+                           ?? context.User.FindFirst("userId")?.Value;
             
-            if (!string.IsNullOrEmpty(supabaseUserId))
+            if (!string.IsNullOrEmpty(userIdClaim) && Guid.TryParse(userIdClaim, out var userId))
             {
                 try
                 {
                     var user = await db.Users
-                        .Include(u => u.Memeberships.Where(m => m.Status == ApiWorker.Authentication.Enum.MembershipStatus.Active))
+                        .Include(u => u.Memberships.Where(m => m.Status == ApiWorker.Authentication.Enum.MembershipStatus.Active))
                         .ThenInclude(m => m.Business)
-                        .FirstOrDefaultAsync(u => u.SupabaseUserId == supabaseUserId);
+                        .FirstOrDefaultAsync(u => u.Id == userId);
 
                     if (user != null)
                     {
                         context.Items["UserId"] = user.Id;
                         context.Items["User"] = user;
                         
-                        var activeMembership = user.Memeberships.FirstOrDefault();
+                        var activeMembership = user.Memberships.FirstOrDefault();
                         if (activeMembership != null)
                         {
                             context.Items["BusinessId"] = activeMembership.BusinessId;
@@ -47,7 +48,7 @@ public sealed class CurrentUserMiddleware
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to load user context for {SupabaseUserId}", supabaseUserId);
+                    _logger.LogWarning(ex, "Failed to load user context for userId {UserId}", userId);
                 }
             }
         }

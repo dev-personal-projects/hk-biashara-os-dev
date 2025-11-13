@@ -17,12 +17,7 @@ public sealed class Business : Entity
 
     public string? Email { get; set; }
     public string? Phone { get; set; }
-
-    public string Currency { get; set; } = "KES";
-    public bool UsesVat { get; set; }
-
-    // 0..100; nullable when unused.
-    public decimal? DefaultTaxRate { get; set; }
+    public string? LogoUrl { get; set; }
 
     public Guid? DefaultTemplateId { get; set; }
     public Template? DefaultTemplate { get; set; }

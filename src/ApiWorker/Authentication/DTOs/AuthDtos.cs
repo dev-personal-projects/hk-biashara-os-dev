@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Microsoft.AspNetCore.Http;
 
 namespace ApiWorker.Authentication.DTOS;
 
@@ -22,7 +23,9 @@ public sealed class SignupResponse
 {
     public bool Success { get; init; }
     public string Message { get; init; } = string.Empty;
-    public string? UserId { get; init; }
+    public string? AccessToken { get; init; }
+    public string? RefreshToken { get; init; }
+    public UserProfile? User { get; init; }
 }
 
 // ===== LOGIN =====
@@ -75,11 +78,7 @@ public sealed class RegisterBusinessRequest
     [MaxLength(32)]
     public string? Phone { get; init; }
 
-    [MaxLength(8)]
-    public string Currency { get; init; } = "KES";
-
-    public bool UsesVat { get; init; }
-    public decimal? DefaultTaxRate { get; init; }
+    public IFormFile? Logo { get; init; }
 }
 
 public sealed class RegisterBusinessResponse
@@ -89,14 +88,68 @@ public sealed class RegisterBusinessResponse
     public Guid? BusinessId { get; init; }
 }
 
+// ===== BUSINESS MANAGEMENT =====
+public sealed class ListBusinessesResponse
+{
+    public bool Success { get; init; }
+    public List<BusinessListItem> Businesses { get; init; } = new();
+}
+
+public sealed class BusinessListItem
+{
+    public Guid Id { get; init; }
+    public string Name { get; init; } = string.Empty;
+    public string Category { get; init; } = string.Empty;
+    public string County { get; init; } = string.Empty;
+    public string? LogoUrl { get; init; }
+    public string UserRole { get; init; } = string.Empty;
+}
+
+public sealed class SwitchBusinessRequest
+{
+    [Required]
+    public Guid BusinessId { get; init; }
+}
+
+public sealed class SwitchBusinessResponse
+{
+    public bool Success { get; init; }
+    public string Message { get; init; } = string.Empty;
+    public BusinessSessionData? Business { get; init; }
+}
+
 // ===== USER SESSION INITIALIZATION =====
 public sealed class InitializeSessionRequest
 {
-    [Required, MaxLength(64)]
-    public string SupabaseUserId { get; init; } = string.Empty;
+    [Required]
+    public Guid UserId { get; init; }
 }
 
+public sealed class UserSessionResult
+{
+    public bool Success { get; init; }
+    public UserSessionData? User { get; init; }
+}
 
+public sealed class UserSessionData
+{
+    public Guid UserId { get; init; }
+    public string FullName { get; init; } = string.Empty;
+    public string Email { get; init; } = string.Empty;
+    public string County { get; init; } = string.Empty;
+    public BusinessSessionData? Business { get; init; }
+    public bool HasBusiness { get; init; }
+}
+
+public sealed class BusinessSessionData
+{
+    public Guid BusinessId { get; init; }
+    public string BusinessName { get; init; } = string.Empty;
+    public string Category { get; init; } = string.Empty;
+    public string County { get; init; } = string.Empty;
+    public string? LogoUrl { get; init; }
+    public string UserRole { get; init; } = string.Empty;
+}
 
 public sealed class UserProfile
 {
@@ -105,4 +158,13 @@ public sealed class UserProfile
     public string Email { get; init; } = string.Empty;
     public string County { get; init; } = string.Empty;
     public bool HasBusiness { get; init; }
+    public int BusinessCount { get; init; }
+    public OnboardingStatus OnboardingStatus { get; init; }
+}
+
+public enum OnboardingStatus
+{
+    AccountCreated = 1,
+    BusinessRegistered = 2,
+    Completed = 3
 }

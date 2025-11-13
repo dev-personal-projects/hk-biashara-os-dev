@@ -19,6 +19,12 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 // Authentication & Authorization
 builder.Services.AddAuthenticationInfrastructure(builder.Configuration);
 
+// Azure Blob Storage
+var blobConnectionString = builder.Configuration.GetConnectionString("BlobStorage")
+    ?? throw new InvalidOperationException("Connection string 'BlobStorage' not found.");
+builder.Services.AddSingleton(x => new Azure.Storage.Blobs.BlobServiceClient(blobConnectionString));
+builder.Services.AddScoped<ApiWorker.Storage.IBlobStorageService, ApiWorker.Storage.BlobStorageService>();
+
 // API services
 builder.Services.AddOpenApi();
 builder.Services.AddControllers();

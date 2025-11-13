@@ -71,40 +71,18 @@ Flutter App → .NET API → Azure SQL
 
 ### Base URL
 ```
-Local: https://localhost:7000/api
+Local: http://localhost:5052/api
 Production: https://your-api.azurewebsites.net/api
 ```
 
-### 1. User Registration
+### 1. Google OAuth (Recommended)
 ```http
-POST /auth/signup
+POST /auth/google
 Content-Type: application/json
 
 {
-  "fullName": "John Doe",
-  "email": "john@example.com",
-  "password": "SecurePass123!",
+  "idToken": "google-id-token-from-supabase",
   "county": "Nairobi"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Account created successfully.",
-  "userId": "uuid-here"
-}
-```
-
-### 2. User Login
-```http
-POST /auth/login
-Content-Type: application/json
-
-{
-  "email": "john@example.com",
-  "password": "SecurePass123!"
 }
 ```
 
@@ -118,43 +96,28 @@ Content-Type: application/json
   "user": {
     "id": "uuid-here",
     "fullName": "John Doe",
-    "email": "john@example.com",
+    "email": "john@gmail.com",
     "county": "Nairobi",
-    "hasBusiness": false
+    "hasBusiness": false,
+    "businessCount": 0,
+    "onboardingStatus": 1
   }
 }
 ```
 
-### 3. Google OAuth (Mobile-Optimized)
-```http
-POST /auth/google
-Content-Type: application/json
-
-{
-  "idToken": "google-id-token-from-mobile",
-  "county": "Nairobi"
-}
-```
-
-**Response:** Same as login response
-
-### 4. Business Registration
+### 2. Business Registration (with Logo Upload)
 ```http
 POST /auth/business/register
 Authorization: Bearer jwt-token-here
-Content-Type: application/json
+Content-Type: multipart/form-data
 
-{
-  "name": "Mama Mboga Shop",
-  "category": "retail",
-  "county": "Nairobi",
-  "town": "Westlands",
-  "email": "shop@example.com",
-  "phone": "+254712345678",
-  "currency": "KES",
-  "usesVat": true,
-  "defaultTaxRate": 16.0
-}
+name: Mama Mboga Shop
+category: retail
+county: Nairobi
+town: Westlands
+email: shop@example.com
+phone: +254712345678
+logo: [file upload - optional]
 ```
 
 **Response:**
@@ -166,6 +129,56 @@ Content-Type: application/json
 }
 ```
 
+### 3. List User Businesses
+```http
+GET /auth/businesses
+Authorization: Bearer jwt-token-here
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "businesses": [
+    {
+      "id": "business-uuid",
+      "name": "Mama Mboga Shop",
+      "category": "retail",
+      "county": "Nairobi",
+      "logoUrl": "https://storage.blob.url/logo.jpg",
+      "userRole": "Owner"
+    }
+  ]
+}
+```
+
+### 4. Switch Business
+```http
+POST /auth/businesses/switch
+Authorization: Bearer jwt-token-here
+Content-Type: application/json
+
+{
+  "businessId": "business-uuid-here"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Business switched successfully",
+  "business": {
+    "businessId": "business-uuid",
+    "businessName": "Mama Mboga Shop",
+    "category": "retail",
+    "county": "Nairobi",
+    "logoUrl": "https://storage.blob.url/logo.jpg",
+    "userRole": "Owner"
+  }
+}
+```
+
 ### 5. Initialize User Session
 ```http
 POST /auth/initialize-session
@@ -173,7 +186,7 @@ Authorization: Bearer jwt-token-here
 Content-Type: application/json
 
 {
-  "supabaseUserId": "supabase-user-id"
+  "userId": "user-uuid-here"
 }
 ```
 
@@ -184,16 +197,14 @@ Content-Type: application/json
   "user": {
     "userId": "uuid-here",
     "fullName": "John Doe",
-    "email": "john@example.com",
+    "email": "john@gmail.com",
     "county": "Nairobi",
     "business": {
       "businessId": "business-uuid",
       "businessName": "Mama Mboga Shop",
       "category": "retail",
       "county": "Nairobi",
-      "currency": "KES",
-      "usesVat": true,
-      "defaultTaxRate": 16.0,
+      "logoUrl": "https://storage.blob.url/logo.jpg",
       "userRole": "Owner"
     },
     "hasBusiness": true
@@ -209,24 +220,33 @@ Content-Type: application/json
 }
 ```
 
-### Common HTTP Status Codes
+### HTTP Status Codes
 - `200 OK`: Success
 - `400 Bad Request`: Invalid input
 - `401 Unauthorized`: Missing/invalid token
-- `403 Forbidden`: Business profile required
 - `404 Not Found`: Resource not found
 - `500 Internal Server Error`: Server error
 
+### Valid Counties (Kenya)
+Nairobi, Mombasa, Kisumu, Nakuru, Eldoret, Thika, Malindi, Kitale, and 40+ more Kenyan counties
+
 ## Mobile Integration Guide
 
-### Google OAuth Flow
-1. **Mobile App**: Use Google Sign-In SDK to get ID token
-2. **API Call**: Send ID token to `/auth/google` endpoint
-3. **Response**: Receive JWT tokens and user profile
-4. **Storage**: Store JWT tokens securely in mobile app
+### Supabase OAuth Flow
+1. **Mobile App**: Use Supabase Auth SDK with Google provider
+2. **Get ID Token**: Extract ID token from Supabase session
+3. **API Call**: Send ID token to `/auth/google` endpoint with county
+4. **Response**: Receive custom JWT tokens and user profile
+5. **Storage**: Store JWT tokens securely in Flutter Secure Storage
+
+### Multi-Business Support
+- Users can create multiple businesses
+- Use `/auth/businesses` to list all businesses
+- Use `/auth/businesses/switch` to change active business
+- Business context is maintained in JWT claims
 
 ### Token Management
-- Store `accessToken` for API requests
+- Store `accessToken` for API requests (expires in 1 hour)
 - Store `refreshToken` for token renewal
 - Include `Authorization: Bearer {accessToken}` in headers
 - Handle token expiration and refresh automatically
@@ -234,7 +254,33 @@ Content-Type: application/json
 ## Development
 
 - **Database**: Azure SQL with EF Core migrations
-- **Auth**: Supabase Auth + JWT validation
+- **Auth**: Supabase OAuth + Custom JWT tokens
+- **Storage**: Azure Blob Storage for images/documents
 - **PDF**: QuestPDF for document generation
 - **Voice**: Azure Speech Services (en/sw)
 - **AI**: Azure OpenAI for NLU and insights
+
+## Configuration
+
+Update `appsettings.json` with your credentials:
+
+```json
+{
+  "ConnectionStrings": {
+    "Default": "Azure SQL connection string",
+    "BlobStorage": "Azure Blob Storage connection string"
+  },
+  "Auth": {
+    "Supabase": {
+      "Url": "https://your-project.supabase.co",
+      "Key": "your-supabase-anon-key"
+    },
+    "Jwt": {
+      "SecretKey": "your-jwt-secret-key",
+      "Issuer": "BiasharaOS",
+      "Audience": "BiasharaOS-Users",
+      "ExpiryHours": 1
+    }
+  }
+}
+```

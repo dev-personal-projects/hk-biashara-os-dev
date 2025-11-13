@@ -15,11 +15,9 @@ public sealed class BusinessConfig : IEntityTypeConfiguration<Business>
         b.Property(x => x.Town).HasMaxLength(96);
         b.Property(x => x.Email).HasMaxLength(256);
         b.Property(x => x.Phone).HasMaxLength(32);
-        b.Property(x => x.Currency).IsRequired().HasMaxLength(8);
 
         b.Property(x => x.Latitude).HasColumnType("decimal(9,6)");
         b.Property(x => x.Longitude).HasColumnType("decimal(9,6)");
-        b.Property(x => x.DefaultTaxRate).HasColumnType("decimal(5,2)");
 
         b.HasIndex(x => x.Name);
         b.Property(x => x.RowVersion).IsRowVersion();

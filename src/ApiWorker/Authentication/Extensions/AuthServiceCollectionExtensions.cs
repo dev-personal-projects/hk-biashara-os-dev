@@ -40,7 +40,9 @@ public static class AuthServiceCollectionExtensions
                     ClockSkew = TimeSpan.FromMinutes(5),
 
                     ValidateIssuerSigningKey = true,
-                    IssuerSigningKey = new SymmetricSecurityKey(key)
+                    IssuerSigningKey = new SymmetricSecurityKey(key),
+                    
+                    TryAllIssuerSigningKeys = true
                 };
             });
 

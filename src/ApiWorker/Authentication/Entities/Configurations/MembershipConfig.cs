@@ -12,7 +12,7 @@ public sealed class MembershipConfig : IEntityTypeConfiguration<Membership>
         b.HasIndex(x => new { x.UserId, x.BusinessId }).IsUnique();
 
         b.HasOne(x => x.User)
-         .WithMany(u => u.Memeberships)
+         .WithMany(u => u.Memberships)
          .HasForeignKey(x => x.UserId)
          .OnDelete(DeleteBehavior.Cascade);
 

@@ -28,6 +28,6 @@ public sealed class AppUser : Entity
 
 
     //nav
-    public ICollection <Membership> Memeberships { get; set; } = new List<Membership>();
+    public ICollection<Membership> Memberships { get; set; } = new List<Membership>();
 
 }
