@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using ApiWorker.Data;
 using ApiWorker.Authentication.Extensions;
 using ApiWorker.Authentication.Middleware;
+using ApiWorker.Speech.Extensions;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -18,6 +19,9 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 
 // Authentication & Authorization
 builder.Services.AddAuthenticationInfrastructure(builder.Configuration);
+
+// Speech Services
+builder.Services.AddSpeechServices(builder.Configuration);
 
 // Azure Blob Storage
 var blobConnectionString = builder.Configuration.GetConnectionString("BlobStorage")
