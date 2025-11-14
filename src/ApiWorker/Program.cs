@@ -3,6 +3,10 @@ using ApiWorker.Data;
 using ApiWorker.Authentication.Extensions;
 using ApiWorker.Authentication.Middleware;
 using ApiWorker.Speech.Extensions;
+using ApiWorker.Speech.Interfaces;
+using ApiWorker.Speech.Services;
+using ApiWorker.Speech.Storage;
+using ApiWorker.Cosmos.Extensions;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -20,8 +24,15 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 // Authentication & Authorization
 builder.Services.AddAuthenticationInfrastructure(builder.Configuration);
 
-// Speech Services
+// Cosmos DB (NoSQL storage for transcripts, analytics)
+builder.Services.AddCosmosInfrastructure(builder.Configuration);
+
+// Speech Services (Azure Speech SDK for STT)
 builder.Services.AddSpeechServices(builder.Configuration);
+
+// Speech Orchestration (STT + Cosmos storage)
+builder.Services.AddScoped<ITranscriptionStore, CosmosTranscriptionStore>();
+builder.Services.AddScoped<ISpeechCaptureService, SpeechCaptureService>();
 
 // Azure Blob Storage
 var blobConnectionString = builder.Configuration.GetConnectionString("BlobStorage")
