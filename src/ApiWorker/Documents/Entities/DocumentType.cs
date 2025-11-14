@@ -1,0 +1,1 @@
+//enum (Invoice, Receipt, Quotation, Ledger, BalanceSheet)

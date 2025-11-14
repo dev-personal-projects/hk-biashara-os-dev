@@ -1,0 +1,1 @@
+//base: Id, BusinessId, Number, Status, Type, BlobUrl, etc.

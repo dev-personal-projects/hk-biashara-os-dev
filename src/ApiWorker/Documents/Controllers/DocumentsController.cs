@@ -1,0 +1,1 @@
+//list/download/share; generic endpoints
