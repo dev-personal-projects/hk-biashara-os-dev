@@ -402,65 +402,366 @@ Speech → Transcript → Extract fields (AI) → Validate → Render (DOCX/PDF)
 Choose template → Fill fields → Render (DOCX/PDF) → Share
 ```
 
-### Documents API
+### Documents API Endpoints
 
-#### Create Invoice (Voice)
+#### 1. Create Invoice Manually
 ```http
-POST /api/documents/invoices/voice
-Authorization: Bearer {jwt}
+POST /api/invoices
+Authorization: Bearer {jwt-token}
 Content-Type: application/json
 
 {
-  "audioUrl": "https://blob/audio.wav",
-  "transcriptText": "invoice to John for 3 bags of maize flour at 180 shillings each",
-  "locale": "sw-KE",
-  "businessId": "uuid"
+  "businessId": "45bc8336-f8b7-4bdc-aaf2-1dfbea5dbaa4",
+  "customer": {
+    "name": "Mega Logistics",
+    "phone": "+254712345678",
+    "email": "john@example.com",
+    "addressLine1": "123 Main Street",
+    "addressLine2": "Suite 100",
+    "city": "Nairobi",
+    "country": "Kenya"
+  },
+  "lines": [
+    {
+      "name": "Maize Flour 2kg",
+      "description": "Premium quality maize flour",
+      "quantity": 90,
+      "unitPrice": 180.00,
+      "taxRate": 0.16
+    },
+    {
+      "name": "Cooking Oil 1L",
+      "description": "Refined vegetable oil",
+      "quantity": 90,
+      "unitPrice": 350.00,
+      "taxRate": 0.16
+    }
+  ],
+  "currency": "KES",
+  "issuedAt": "2025-01-15T00:00:00Z",
+  "dueAt": "2025-02-15T00:00:00Z",
+  "notes": "Payment due within 30 days",
+  "reference": "PO-2025-001"
 }
 ```
 
-#### Create Invoice (Manual)
-```http
-POST /api/documents/invoices
-Authorization: Bearer {jwt}
-Content-Type: application/json
-
+**Minimal Example (Required Fields Only):**
+```json
 {
-  "businessId": "uuid",
-  "currency": "KES",
+  "businessId": "45bc8336-f8b7-4bdc-aaf2-1dfbea5dbaa4",
   "customer": {
-    "name": "John Kamau",
+    "name": "Mega Logistics",
     "phone": "+254712345678"
   },
   "lines": [
     {
       "name": "Maize Flour 2kg",
-      "quantity": 3,
-      "unitPrice": 180
+      "quantity": 90,
+      "unitPrice": 180.00
+    },
+    {
+      "name": "Cooking Oil 1L",
+      "quantity": 90,
+      "unitPrice": 350.00,
+      "taxRate": 0.16
     }
   ],
-  "taxRate": 0.16,
-  "notes": "Thank you for your business"
+  "currency": "KES"
 }
 ```
 
-#### Share Document
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Invoice created successfully",
+  "documentId": "302a871c-0c8f-4d65-17ed-08de236d7832",
+  "documentNumber": "INV-202511-0006",
+  "urls": {
+    "docxUrl": "https://biasharaos.blob.core.windows.net/invoices/INV-202511-0006.docx",
+    "pdfUrl": "https://biasharaos.blob.core.windows.net/invoices/INV-202511-0006.pdf",
+    "previewUrl": "https://biasharaos.blob.core.windows.net/doc-previews/INV-202511-0006.png"
+  }
+}
+```
+
+#### 2. Create Invoice from Voice
 ```http
-POST /api/documents/{documentId}/share
-Authorization: Bearer {jwt}
+POST /api/invoices/voice
+Authorization: Bearer {jwt-token}
 Content-Type: application/json
 
 {
-  "channel": "WhatsApp",
-  "phone": "+254712345678",
-  "message": "Here is your invoice from Mama Mboga Shop."
+  "businessId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "transcriptText": "Create invoice for John Kamau. Three bags of maize flour at 180 shillings each and two bottles of cooking oil at 350 shillings each",
+  "locale": "en-KE"
 }
 ```
 
-### Rendering
-- **DOCX**: OpenXML with content controls (editable by users)
-- **PDF**: QuestPDF for fast server-side generation
-- **Validation**: FluentValidation for totals/taxes/required fields
-- **Auditing**: ShareLog tracks all document shares
+**Swahili Example:**
+```json
+{
+  "businessId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "transcriptText": "Tengeneza ankara kwa John Kamau. Mifuko mitatu ya unga kwa shilingi 180 kila moja na chupa mbili za mafuta kwa shilingi 350 kila moja",
+  "locale": "sw-KE"
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Invoice created from voice successfully",
+  "documentId": "invoice-uuid",
+  "documentNumber": "INV-202501-0002",
+  "urls": {
+    "docxUrl": "https://biasharaos.blob.core.windows.net/invoices/INV-202501-0002.docx",
+    "pdfUrl": "https://biasharaos.blob.core.windows.net/invoices/INV-202501-0002.pdf",
+    "previewUrl": "https://biasharaos.blob.core.windows.net/doc-previews/INV-202501-0002.png"
+  }
+}
+```
+
+#### 3. Get Invoice Details
+```http
+GET /api/invoices/{invoiceId}
+Authorization: Bearer {jwt-token}
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Invoice retrieved successfully",
+  "invoice": {
+    "id": "invoice-uuid",
+    "number": "INV-202501-0001",
+    "status": "Draft",
+    "currency": "KES",
+    "customer": {
+      "name": "John Kamau",
+      "phone": "+254712345678",
+      "email": "john@example.com"
+    },
+    "lines": [
+      {
+        "name": "Maize Flour 2kg",
+        "quantity": 3,
+        "unitPrice": 180.00,
+        "taxRate": 0.16
+      }
+    ],
+    "subtotal": 540.00,
+    "tax": 86.40,
+    "total": 626.40,
+    "issuedAt": "2025-01-15T10:30:00Z",
+    "dueAt": "2025-02-15T00:00:00Z",
+    "notes": "Payment due within 30 days",
+    "urls": {
+      "docxUrl": "https://biasharaos.blob.core.windows.net/invoices/INV-202501-0001.docx",
+      "pdfUrl": "https://biasharaos.blob.core.windows.net/invoices/INV-202501-0001.pdf",
+      "previewUrl": "https://biasharaos.blob.core.windows.net/doc-previews/INV-202501-0001.png"
+    },
+    "createdAt": "2025-01-15T10:30:00Z",
+    "updatedAt": "2025-01-15T10:30:00Z"
+  }
+}
+```
+
+#### 4. List Invoices with Filters
+```http
+GET /api/invoices?page=1&pageSize=20&status=Draft&searchTerm=John
+Authorization: Bearer {jwt-token}
+```
+
+**Query Parameters:**
+- `page` (default: 1)
+- `pageSize` (default: 20)
+- `type` (Invoice, Receipt, Quotation)
+- `status` (Draft, Sent, Paid, Overdue, Cancelled)
+- `fromDate` (ISO 8601)
+- `toDate` (ISO 8601)
+- `searchTerm` (searches number and customer name)
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Found 15 documents",
+  "documents": [
+    {
+      "id": "invoice-uuid",
+      "number": "INV-202501-0001",
+      "type": "Invoice",
+      "status": "Draft",
+      "customerName": "John Kamau",
+      "total": 626.40,
+      "currency": "KES",
+      "issuedAt": "2025-01-15T10:30:00Z"
+    }
+  ],
+  "totalCount": 15,
+  "page": 1,
+  "pageSize": 20,
+  "totalPages": 1
+}
+```
+
+#### 5. Update Invoice (Draft Only)
+```http
+PUT /api/invoices/{invoiceId}
+Authorization: Bearer {jwt-token}
+Content-Type: application/json
+
+{
+  "invoiceId": "invoice-uuid",
+  "customer": {
+    "name": "John Kamau Updated",
+    "phone": "+254712345678"
+  },
+  "lines": [
+    {
+      "name": "Maize Flour 2kg",
+      "quantity": 5,
+      "unitPrice": 180.00,
+      "taxRate": 0.16
+    }
+  ],
+  "notes": "Updated payment terms"
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Invoice updated successfully",
+  "documentId": "invoice-uuid",
+  "documentNumber": "INV-202501-0001"
+}
+```
+
+#### 6. Share Invoice
+```http
+POST /api/invoices/{invoiceId}/share
+Authorization: Bearer {jwt-token}
+Content-Type: application/json
+
+{
+  "documentId": "invoice-uuid",
+  "channel": "WhatsApp",
+  "target": "+254712345678"
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Document shared via WhatsApp",
+  "shareLogId": "share-log-uuid",
+  "publicUrl": "https://blob.storage/invoices/INV-202501-0001.pdf"
+}
+```
+
+### Testing the API
+
+#### Step 1: Signup and Get Token
+```bash
+curl -X POST http://localhost:5052/api/auth/signup \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fullName": "Test User",
+    "email": "test@example.com",
+    "password": "Test123!",
+    "county": "Nairobi"
+  }'
+```
+
+Save the `accessToken` from response.
+
+#### Step 2: Register Business
+```bash
+curl -X POST http://localhost:5052/api/auth/business/register \
+  -H "Authorization: Bearer {your-token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Test Shop",
+    "category": "retail",
+    "county": "Nairobi",
+    "town": "Westlands",
+    "phone": "+254712345678"
+  }'
+```
+
+Save the `businessId` from response.
+
+#### Step 3: Create Invoice
+```bash
+curl -X POST http://localhost:5052/api/invoices \
+  -H "Authorization: Bearer {your-token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "businessId": "{your-business-id}",
+    "customer": {
+      "name": "John Doe",
+      "phone": "+254712345678"
+    },
+    "lines": [
+      {
+        "name": "Product A",
+        "quantity": 2,
+        "unitPrice": 100.00
+      }
+    ],
+    "currency": "KES"
+  }'
+```
+
+#### Step 4: Create Voice Invoice
+```bash
+curl -X POST http://localhost:5052/api/invoices/voice \
+  -H "Authorization: Bearer {your-token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "businessId": "{your-business-id}",
+    "transcriptText": "Invoice for Jane with 3 bags of flour at 150 each",
+    "locale": "en-KE"
+  }'
+```
+
+#### Step 5: List Invoices
+```bash
+curl -X GET "http://localhost:5052/api/invoices?page=1&pageSize=10" \
+  -H "Authorization: Bearer {your-token}"
+```
+
+### How It Works
+
+#### Voice-to-Invoice Flow
+1. **Mobile App**: User speaks invoice details in English or Swahili
+2. **Transcription**: Mobile transcribes locally (offline) or sends audio to API
+3. **AI Extraction**: Azure OpenAI extracts structured data (customer, items, prices)
+4. **Validation**: System validates totals, tax calculations, required fields
+5. **Generation**: Creates DOCX using OpenXML (editable)
+6. **Storage**: Uploads to Azure Blob Storage
+7. **Response**: Returns document URLs to mobile app
+
+#### Manual Invoice Flow
+1. **Mobile App**: User fills form with customer and line items
+2. **Validation**: FluentValidation checks all business rules
+3. **Calculation**: System computes subtotal, tax, total
+4. **Numbering**: Auto-generates invoice number (INV-202501-0001)
+5. **Generation**: Creates DOCX with business branding
+6. **Storage**: Uploads to Azure Blob Storage
+7. **Response**: Returns document URLs
+
+#### Document Rendering
+- **DOCX**: OpenXML programmatic generation (no templates needed)
+- **PDF**: Coming soon (QuestPDF integration)
+- **Validation**: FluentValidation for business rules
+- **Auditing**: ShareLog tracks all shares
+- **Numbering**: Format: {prefix}{yyyyMM}-{sequence} per business
 
 ---
 
@@ -500,6 +801,20 @@ dotnet test
 dotnet test --filter "FullyQualifiedName~AuthenticationServiceTests"
 ```
 
+### Common Issues
+
+**Issue**: "Business not found" when creating invoice
+- **Solution**: Ensure you've registered a business first using `/auth/business/register`
+
+**Issue**: "Transcript text is required" for voice invoice
+- **Solution**: Provide `transcriptText` field with the spoken invoice details
+
+**Issue**: "Only draft invoices can be edited"
+- **Solution**: You can only update invoices with status "Draft". Once sent/paid, they're locked.
+
+**Issue**: 401 Unauthorized
+- **Solution**: Include `Authorization: Bearer {token}` header in all authenticated requests
+
 ---
 
 ## License
@@ -507,6 +822,14 @@ dotnet test --filter "FullyQualifiedName~AuthenticationServiceTests"
 Proprietary - BiasharaOS © 2024
 
 ---
+
+## API Response Codes
+
+- **200 OK**: Request successful
+- **400 Bad Request**: Validation error or invalid input
+- **401 Unauthorized**: Missing or invalid JWT token
+- **404 Not Found**: Resource doesn't exist
+- **500 Internal Server Error**: Server error (check logs)
 
 ## Support
 

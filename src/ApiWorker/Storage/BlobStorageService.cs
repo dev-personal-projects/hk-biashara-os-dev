@@ -6,6 +6,7 @@ namespace ApiWorker.Storage;
 public interface IBlobStorageService
 {
     Task<string> UploadImageAsync(IFormFile file, string containerName, CancellationToken ct = default);
+    Task<string> UploadAsync(Stream stream, string fileName, string containerName, string contentType, CancellationToken ct = default);
 }
 
 public sealed class BlobStorageService : IBlobStorageService
@@ -30,6 +31,19 @@ public sealed class BlobStorageService : IBlobStorageService
         var blobHttpHeaders = new BlobHttpHeaders { ContentType = file.ContentType };
         
         await using var stream = file.OpenReadStream();
+        await blobClient.UploadAsync(stream, new BlobUploadOptions { HttpHeaders = blobHttpHeaders }, ct);
+
+        return blobClient.Uri.ToString();
+    }
+
+    public async Task<string> UploadAsync(Stream stream, string fileName, string containerName, string contentType, CancellationToken ct = default)
+    {
+        var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
+        await containerClient.CreateIfNotExistsAsync(PublicAccessType.Blob, cancellationToken: ct);
+
+        var blobClient = containerClient.GetBlobClient(fileName);
+        var blobHttpHeaders = new BlobHttpHeaders { ContentType = contentType };
+        
         await blobClient.UploadAsync(stream, new BlobUploadOptions { HttpHeaders = blobHttpHeaders }, ct);
 
         return blobClient.Uri.ToString();

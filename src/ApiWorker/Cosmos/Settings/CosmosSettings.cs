@@ -22,22 +22,22 @@ public sealed class CosmosSettings
     public string Database { get; set; } = "biashara";
 
     /// <summary>
-    /// Container names for different data types
-    /// </summary>
-    public Containers Containers { get; set; } = new();
-
-    /// <summary>
     /// Auto-create database and containers if they don't exist (useful for dev/test)
     /// Set to false in production for better control
     /// </summary>
     public bool CreateIfNotExists { get; set; } = true;
 
-    public sealed class Containers
-    {
-        /// <summary>
-        /// Container for storing speech transcription records
-        /// Partitioned by /businessId for efficient tenant isolation
-        /// </summary>
-        public string Transcripts { get; set; } = "speech-transcripts";
-    }
+    /// <summary>
+    /// Container names for different data types
+    /// </summary>
+    public CosmosContainers Containers { get; set; } = new();
+}
+
+public sealed class CosmosContainers
+{
+    /// <summary>
+    /// Container for storing speech transcription records
+    /// Partitioned by /businessId for efficient tenant isolation
+    /// </summary>
+    public string Transcripts { get; set; } = "speech-transcripts";
 }

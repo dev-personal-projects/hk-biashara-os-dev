@@ -1,1 +1,0 @@
-//send PDFs via WhatsApp Business Cloud API

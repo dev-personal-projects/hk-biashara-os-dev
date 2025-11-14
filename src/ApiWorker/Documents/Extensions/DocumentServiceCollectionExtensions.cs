@@ -1,4 +1,8 @@
 using ApiWorker.Documents.Settings;
+using ApiWorker.Documents.Services;
+using ApiWorker.Documents.Interfaces;
+using ApiWorker.Documents.Mappings;
+using FluentValidation;
 
 namespace ApiWorker.Documents.Extensions;
 
@@ -48,18 +52,18 @@ public static class DocumentServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
-        // ===== SERVICE REGISTRATION =====
-        // Services will be registered here as we build them
-        // Example patterns:
-        // - Scoped: New instance per HTTP request (most common for services with DbContext)
-        // - Singleton: Single instance for app lifetime (stateless services, caches)
-        // - Transient: New instance every time (rarely used, for lightweight helpers)
+        services.AddOptions<AzureOpenAISettings>()
+            .Bind(configuration.GetSection("AzureOpenAI"));
 
-        // TODO: Register document services
-        // services.AddScoped<IDocumentService, DocumentService>();
-        // services.AddScoped<ITemplateService, TemplateService>();
-        // services.AddScoped<IRenderService, RenderService>();
-        // services.AddScoped<IShareService, ShareService>();
+        // ===== AUTOMAPPER REGISTRATION =====
+        services.AddAutoMapper(typeof(DocumentMappingProfile));
+
+        // ===== FLUENTVALIDATION REGISTRATION =====
+        services.AddValidatorsFromAssemblyContaining<DocumentMappingProfile>();
+
+        // ===== SERVICE REGISTRATION =====
+        services.AddScoped<IDocumentService, InvoiceService>();
+        services.AddSingleton<IVoiceIntentService, VoiceIntentService>();
 
         return services;
     }

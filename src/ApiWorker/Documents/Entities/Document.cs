@@ -37,6 +37,7 @@ public abstract class Document
     // Storage locations
     public string? DocxBlobUrl { get; set; }
     public string? PdfBlobUrl { get; set; }
+    public string? PreviewBlobUrl { get; set; }
 
     // Optional pointer to NoSQL (Cosmos) for the rendered JSON snapshot
     public string? CosmosId { get; set; }
