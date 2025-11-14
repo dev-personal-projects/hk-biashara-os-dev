@@ -1,1 +1,0 @@
-//Azure Speech locale, phrase lists
