@@ -11,12 +11,11 @@ param repositoryUrl string
 @description('Git branch to deploy from')
 param branch string = 'main'
 
-@description('CPU allocation in millicores (e.g., 500 = 0.5 cores). Minimum 250 millicores (0.25 cores)')
-@minValue(250)
-param cpu int = 500
+@description('CPU allocation in cores (e.g., 0.5 for half core). Minimum 0.25 cores')
+param cpu string = '0.5'
 
-@description('Memory allocation in MB')
-param memoryMi int = 1024
+@description('Memory allocation in Gi (e.g., 1.0 for 1 Gibibyte)')
+param memory string = '1.0Gi'
 
 @description('Initial number of replicas')
 #disable-next-line no-unused-params
@@ -105,8 +104,8 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
           name: 'main'
           image: 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
           resources: {
-            cpu: json('${cpu / 1000}')
-            memory: '${memoryMi}Mi'
+            cpu: json(cpu)
+            memory: memory
           }
         }
       ]

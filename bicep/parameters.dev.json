@@ -15,10 +15,10 @@
       "value": "East US"
     },
     "cpu": {
-      "value": 500
+      "value": "0.5"
     },
-    "memoryMi": {
-      "value": 1024
+    "memory": {
+      "value": "1.0Gi"
     },
     "scaleMin": {
       "value": 1
