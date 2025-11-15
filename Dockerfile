@@ -3,12 +3,12 @@ FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /app
 
 # Copy csproj and restore dependencies
-COPY *.csproj ./
-RUN dotnet restore
+COPY src/ApiWorker/*.csproj ./src/ApiWorker/
+RUN dotnet restore src/ApiWorker/ApiWorker.csproj
 
 # Copy everything else and build
 COPY . ./
-RUN dotnet publish -c Release -o out
+RUN dotnet publish src/ApiWorker/ApiWorker.csproj -c Release -o out
 
 # Use the official .NET 9.0 runtime image for running
 FROM mcr.microsoft.com/dotnet/aspnet:9.0
@@ -34,4 +34,4 @@ ENV ASPNETCORE_URLS=http://+:8000
 ENV ASPNETCORE_ENVIRONMENT=Production
 
 # Run the application
-ENTRYPOINT ["dotnet", "deploymentservice.dll"]
+ENTRYPOINT ["dotnet", "ApiWorker.dll"]
