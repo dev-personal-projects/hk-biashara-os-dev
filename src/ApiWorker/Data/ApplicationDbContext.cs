@@ -1,18 +1,28 @@
 using System.Reflection;
 using Microsoft.EntityFrameworkCore;
 using ApiWorker.Authentication.Entities;
+using ApiWorker.Documents.Entities;
+using AuthTemplate = ApiWorker.Authentication.Entities.Template;
+using DocTemplate = ApiWorker.Documents.Entities.Template;
 
 namespace ApiWorker.Data;
 
-// EF Core DbContext for Azure SQL. Config is added in Program.cs.
 public sealed class ApplicationDbContext : DbContext
 {
     public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options) { }
 
+    // Authentication
     public DbSet<AppUser> Users => Set<AppUser>();
     public DbSet<Business> Businesses => Set<Business>();
     public DbSet<Membership> Memberships => Set<Membership>();
-    public DbSet<Template> Templates => Set<Template>();
+    public DbSet<AuthTemplate> AuthTemplates => Set<AuthTemplate>();
+    
+    // Documents
+    public DbSet<ApiWorker.Documents.Entities.Document> Documents => Set<ApiWorker.Documents.Entities.Document>();
+    public DbSet<ApiWorker.Documents.Entities.Invoice> Invoices => Set<ApiWorker.Documents.Entities.Invoice>();
+    public DbSet<ApiWorker.Documents.Entities.InvoiceLine> InvoiceLines => Set<ApiWorker.Documents.Entities.InvoiceLine>();
+    public DbSet<DocTemplate> DocumentTemplates => Set<DocTemplate>();
+    public DbSet<ApiWorker.Documents.Entities.ShareLog> ShareLogs => Set<ApiWorker.Documents.Entities.ShareLog>();
 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -22,9 +32,29 @@ public sealed class ApplicationDbContext : DbContext
         // Apply all IEntityTypeConfiguration<> in Entities/Configurations
         modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
 
-        // Optional: enforce one default template per (Business, DocType)
-        modelBuilder.Entity<Template>()
-            .HasIndex(x => new { x.BusinessId, x.DocType })
+        // Foreign key relationships: Document -> Business & AppUser
+        modelBuilder.Entity<Document>()
+            .HasOne<Business>()
+            .WithMany()
+            .HasForeignKey(d => d.BusinessId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Document>()
+            .HasOne<AppUser>()
+            .WithMany()
+            .HasForeignKey(d => d.CreatedByUserId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // Foreign key relationship: DocumentTemplate -> Business
+        modelBuilder.Entity<DocTemplate>()
+            .HasOne<Business>()
+            .WithMany()
+            .HasForeignKey(t => t.BusinessId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // Optional: enforce one default template per (Business, Type)
+        modelBuilder.Entity<DocTemplate>()
+            .HasIndex(x => new { x.BusinessId, x.Type })
             .IsUnique()
             .HasFilter("[IsDefault] = 1");
     }
