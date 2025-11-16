@@ -199,7 +199,7 @@ deploy_container_app() {
     --service-principal-client-secret "$client_secret" \
     --service-principal-tenant-id "$tenant_id" \
     --ingress external \
-    --target-port 8000
+    --target-port 8080
 
   log_info "Enabling managed identity for Container App"
   az containerapp identity assign \
@@ -215,7 +215,7 @@ deploy_container_app() {
     --memory 0.5Gi \
     --min-replicas 1 \
     --max-replicas 10 \
-    --set-env-vars "KeyVaultName=$keyvault_name" "ASPNETCORE_ENVIRONMENT=Production"
+    --set-env-vars "KeyVaultName=$keyvault_name" "ASPNETCORE_ENVIRONMENT=Production" "ASPNETCORE_HTTP_PORTS=8080"
 
   log_info "Granting Container App access to Key Vault"
   local principal_id
