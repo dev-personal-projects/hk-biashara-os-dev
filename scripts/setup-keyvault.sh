@@ -40,7 +40,7 @@ upload_secrets() {
   local tmpfile=$(mktemp)
   
   # Connection Strings
-  echo -n 'Server=tcp:biashara-os-server-name.database.windows.net,1433;Initial Catalog=biashara-os-db-name;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;Authentication="Active Directory Default";' > "$tmpfile"
+  echo -n 'Server=tcp:biashara-os-server-name.database.windows.net,1433;Initial Catalog=biasharaos-db;Persist Security Info=False;User ID=biashara-os-server-name;Password=Munene@04m;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;' > "$tmpfile"
   az keyvault secret set --vault-name "$keyvault_name" --name "ConnectionStrings--Default" --file "$tmpfile" --output none
   
   echo -n 'DefaultEndpointsProtocol=https;AccountName=biasharaos;AccountKey=FpuEloIliwJrI3NrIl6jan6GxW+jVejUuiaPuOF9UkrwuGEueIkMM85FePBJleuT9woLeQMDTi4b+AStvvHwbw==;EndpointSuffix=core.windows.net' > "$tmpfile"

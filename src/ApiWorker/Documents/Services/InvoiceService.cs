@@ -79,7 +79,7 @@ public sealed class InvoiceService : IDocumentService
                 CustomerName = extracted.CustomerName,
                 CustomerPhone = extracted.CustomerPhone,
                 Notes = extracted.Notes,
-                Lines = extracted.Items.Select(item => new InvoiceLine
+                Lines = extracted.Items.Select(item => new TransactionalDocumentLine
                 {
                     Name = item.Name,
                     Quantity = item.Quantity,
@@ -310,10 +310,10 @@ public sealed class InvoiceService : IDocumentService
             if (request.Lines != null && request.Lines.Any())
             {
                 // Remove old lines
-                _db.InvoiceLines.RemoveRange(invoice.Lines);
+                _db.TransactionalDocumentLines.RemoveRange(invoice.Lines);
                 
                 // Add new lines
-                invoice.Lines = _mapper.Map<List<InvoiceLine>>(request.Lines);
+                invoice.Lines = _mapper.Map<List<TransactionalDocumentLine>>(request.Lines);
                 
                 // Recalculate totals
                 CalculateTotals(invoice);

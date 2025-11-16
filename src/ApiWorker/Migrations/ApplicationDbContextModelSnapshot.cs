@@ -325,44 +325,9 @@ namespace ApiWorker.Migrations
                             t.HasCheckConstraint("CK_Documents_TotalNonNegative", "[Total] >= 0");
                         });
 
-                    b.UseTptMappingStrategy();
-                });
+                    b.HasDiscriminator<int>("Type");
 
-            modelBuilder.Entity("ApiWorker.Documents.Entities.InvoiceLine", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(512)
-                        .HasColumnType("nvarchar(512)");
-
-                    b.Property<Guid>("InvoiceId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal>("LineTotal")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<decimal>("Quantity")
-                        .HasColumnType("decimal(18,3)");
-
-                    b.Property<decimal>("TaxRate")
-                        .HasColumnType("decimal(5,4)");
-
-                    b.Property<decimal>("UnitPrice")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("InvoiceId");
-
-                    b.ToTable("InvoiceLines", (string)null);
+                    b.UseTphMappingStrategy();
                 });
 
             modelBuilder.Entity("ApiWorker.Documents.Entities.ShareLog", b =>
@@ -455,7 +420,44 @@ namespace ApiWorker.Migrations
                     b.ToTable("DocumentTemplates", (string)null);
                 });
 
-            modelBuilder.Entity("ApiWorker.Documents.Entities.Invoice", b =>
+            modelBuilder.Entity("ApiWorker.Documents.Entities.TransactionalDocumentLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<Guid>("DocumentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("LineTotal")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<decimal>("Quantity")
+                        .HasColumnType("decimal(18,3)");
+
+                    b.Property<decimal>("TaxRate")
+                        .HasColumnType("decimal(5,4)");
+
+                    b.Property<decimal>("UnitPrice")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DocumentId");
+
+                    b.ToTable("TransactionalDocumentLines", (string)null);
+                });
+
+            modelBuilder.Entity("ApiWorker.Documents.Entities.TransactionalDocument", b =>
                 {
                     b.HasBaseType("ApiWorker.Documents.Entities.Document");
 
@@ -501,10 +503,24 @@ namespace ApiWorker.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
-                    b.ToTable("Invoices", null, t =>
+                    b.ToTable(t =>
                         {
                             t.HasCheckConstraint("CK_Documents_TotalNonNegative", "[Total] >= 0");
                         });
+
+                    b.HasDiscriminator().HasValue(1);
+                });
+
+            modelBuilder.Entity("ApiWorker.Documents.Entities.Invoice", b =>
+                {
+                    b.HasBaseType("ApiWorker.Documents.Entities.TransactionalDocument");
+
+                    b.ToTable(t =>
+                        {
+                            t.HasCheckConstraint("CK_Documents_TotalNonNegative", "[Total] >= 0");
+                        });
+
+                    b.HasDiscriminator().HasValue(1);
                 });
 
             modelBuilder.Entity("ApiWorker.Authentication.Entities.Business", b =>
@@ -561,17 +577,6 @@ namespace ApiWorker.Migrations
                         .IsRequired();
                 });
 
-            modelBuilder.Entity("ApiWorker.Documents.Entities.InvoiceLine", b =>
-                {
-                    b.HasOne("ApiWorker.Documents.Entities.Invoice", "Invoice")
-                        .WithMany("Lines")
-                        .HasForeignKey("InvoiceId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Invoice");
-                });
-
             modelBuilder.Entity("ApiWorker.Documents.Entities.ShareLog", b =>
                 {
                     b.HasOne("ApiWorker.Documents.Entities.Document", "Document")
@@ -591,13 +596,15 @@ namespace ApiWorker.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
-            modelBuilder.Entity("ApiWorker.Documents.Entities.Invoice", b =>
+            modelBuilder.Entity("ApiWorker.Documents.Entities.TransactionalDocumentLine", b =>
                 {
-                    b.HasOne("ApiWorker.Documents.Entities.Document", null)
-                        .WithOne()
-                        .HasForeignKey("ApiWorker.Documents.Entities.Invoice", "Id")
+                    b.HasOne("ApiWorker.Documents.Entities.TransactionalDocument", "Document")
+                        .WithMany("Lines")
+                        .HasForeignKey("DocumentId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("Document");
                 });
 
             modelBuilder.Entity("ApiWorker.Authentication.Entities.AppUser", b =>
@@ -617,7 +624,7 @@ namespace ApiWorker.Migrations
                     b.Navigation("ShareLogs");
                 });
 
-            modelBuilder.Entity("ApiWorker.Documents.Entities.Invoice", b =>
+            modelBuilder.Entity("ApiWorker.Documents.Entities.TransactionalDocument", b =>
                 {
                     b.Navigation("Lines");
                 });
