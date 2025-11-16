@@ -8,14 +8,38 @@ using ApiWorker.Speech.Services;
 using ApiWorker.Speech.Storage;
 using ApiWorker.Cosmos.Extensions;
 using ApiWorker.Documents.Extensions;
+using Azure.Identity;
+using Azure.Security.KeyVault.Secrets;
+using Azure.Extensions.AspNetCore.Configuration.Secrets;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// ===== AZURE KEY VAULT CONFIGURATION =====
+// ALWAYS load secrets from Azure Key Vault using Managed Identity
+// No fallback to local credentials - Key Vault is the single source of truth
+// Get Key Vault name from environment variable (set by Container App)
+var keyVaultName = builder.Configuration["KeyVaultName"] 
+    ?? throw new InvalidOperationException("KeyVaultName environment variable not set. Cannot load secrets.");
+
+var keyVaultUri = new Uri($"https://{keyVaultName}.vault.azure.net/");
+
+// DefaultAzureCredential: Uses Managed Identity in Azure (Container App)
+// For local development, use Azure CLI: az login
+var credential = new DefaultAzureCredential();
+
+// SecretClient: Azure SDK client for Key Vault operations
+var secretClient = new SecretClient(keyVaultUri, credential);
+
+// Add Key Vault as configuration source
+// Secret naming convention: "ConnectionStrings--Default" maps to ConnectionStrings:Default
+// All secrets from Key Vault override any values in appsettings.json
+builder.Configuration.AddAzureKeyVault(secretClient, new KeyVaultSecretManager());
+
 // ===== DATABASE CONFIGURATION =====
 // Entity Framework Core with Azure SQL Database
-// Connection string stored in appsettings.json under "ConnectionStrings:Default"
+// Connection string MUST be loaded from Key Vault
 var connectionString = builder.Configuration.GetConnectionString("Default")
-    ?? throw new InvalidOperationException("Connection string 'Default' not found.");
+    ?? throw new InvalidOperationException("Connection string 'Default' not found in Key Vault.");
 
 // Register DbContext with SQL Server provider
 // DbContext lifetime: Scoped (new instance per HTTP request)
@@ -80,8 +104,9 @@ builder.Services.AddScoped<ISpeechCaptureService, SpeechCaptureService>();
 
 // ===== AZURE BLOB STORAGE =====
 // Used for storing documents, templates, and audio files
+// Connection string MUST be loaded from Key Vault
 var blobConnectionString = builder.Configuration.GetConnectionString("BlobStorage")
-    ?? throw new InvalidOperationException("Connection string 'BlobStorage' not found.");
+    ?? throw new InvalidOperationException("Connection string 'BlobStorage' not found in Key Vault.");
 
 /// <summary>
 /// BlobServiceClient: Azure Blob Storage client.
