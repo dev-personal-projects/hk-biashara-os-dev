@@ -20,6 +20,14 @@ public static class CosmosServiceCollectionExtensions
         services.Configure<CosmosSettings>(section);
         var settings = section.Get<CosmosSettings>() ?? new CosmosSettings();
 
+        // Skip Cosmos initialization if credentials are not configured (local dev)
+        if (string.IsNullOrEmpty(settings.Endpoint) || 
+            string.IsNullOrEmpty(settings.Key) || 
+            settings.Key == "local-development-key")
+        {
+            return services;
+        }
+
         // Create Cosmos client with connection settings
         // CosmosClient is thread-safe and should be singleton for connection pooling
         var client = new CosmosClient(settings.Endpoint, settings.Key,

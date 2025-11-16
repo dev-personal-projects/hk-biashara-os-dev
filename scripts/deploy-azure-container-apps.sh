@@ -184,6 +184,7 @@ deploy_container_app() {
   local client_id="b744d9b5-68b1-4e3e-82d6-93698d50a3fb"
   local client_secret="wP18Q~FVBlhquwxUh4X7EP.nbmXcbZsLGpRyfbzV"
   local tenant_id="55d15577-df36-46ee-9782-f7b38ae4ea3c"
+  local keyvault_name="${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}-kv"
 
   log_info "Deploying Container App: $container_app_name"
 
@@ -198,7 +199,13 @@ deploy_container_app() {
     --service-principal-client-secret "$client_secret" \
     --service-principal-tenant-id "$tenant_id" \
     --ingress external \
-    --target-port 8000
+    --target-port 8080
+
+  log_info "Enabling managed identity for Container App"
+  az containerapp identity assign \
+    --name "$container_app_name" \
+    --resource-group "$PROJECT_RESOURCE_GROUP" \
+    --system-assigned
 
   log_info "Configuring Container App scaling and resources"
   az containerapp update \
@@ -207,7 +214,20 @@ deploy_container_app() {
     --cpu 0.25 \
     --memory 0.5Gi \
     --min-replicas 1 \
-    --max-replicas 10
+    --max-replicas 10 \
+    --set-env-vars "KeyVaultName=$keyvault_name" "ASPNETCORE_ENVIRONMENT=Production" "ASPNETCORE_HTTP_PORTS=8080"
+
+  log_info "Granting Container App access to Key Vault"
+  local principal_id
+  principal_id=$(az containerapp show \
+    --name "$container_app_name" \
+    --resource-group "$PROJECT_RESOURCE_GROUP" \
+    --query "identity.principalId" -o tsv)
+
+  az keyvault set-policy \
+    --name "$keyvault_name" \
+    --object-id "$principal_id" \
+    --secret-permissions get list
 }
 
 # ----- Main -----
