@@ -40,14 +40,10 @@ upload_secrets() {
   local tmpfile=$(mktemp)
   
   # Connection Strings
-  cat > "$tmpfile" << 'EOF'
-Server=tcp:biashara-os-server-name.database.windows.net,1433;Initial Catalog=biashara-os-db-name;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;Authentication="Active Directory Default";
-EOF
+  echo -n 'Server=tcp:biashara-os-server-name.database.windows.net,1433;Initial Catalog=biashara-os-db-name;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;Authentication="Active Directory Default";' > "$tmpfile"
   az keyvault secret set --vault-name "$keyvault_name" --name "ConnectionStrings--Default" --file "$tmpfile" --output none
   
-  cat > "$tmpfile" << 'EOF'
-DefaultEndpointsProtocol=https;AccountName=biasharaos;AccountKey=FpuEloIliwJrI3NrIl6jan6GxW+jVejUuiaPuOF9UkrwuGEueIkMM85FePBJleuT9woLeQMDTi4b+AStvvHwbw==;EndpointSuffix=core.windows.net
-EOF
+  echo -n 'DefaultEndpointsProtocol=https;AccountName=biasharaos;AccountKey=FpuEloIliwJrI3NrIl6jan6GxW+jVejUuiaPuOF9UkrwuGEueIkMM85FePBJleuT9woLeQMDTi4b+AStvvHwbw==;EndpointSuffix=core.windows.net' > "$tmpfile"
   az keyvault secret set --vault-name "$keyvault_name" --name "ConnectionStrings--BlobStorage" --file "$tmpfile" --output none
   
   # Cosmos DB
