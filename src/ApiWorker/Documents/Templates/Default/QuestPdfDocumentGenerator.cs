@@ -171,25 +171,30 @@ public static class QuestPdfDocumentGenerator
                 column.Item().Text(document.Notes).FontSize(9).FontColor(secondary);
             }
 
-            if (signature.HasSignature)
+            column.Item().PaddingTop(20).Column(sig =>
             {
-                column.Item().PaddingTop(20).Column(sig =>
+                sig.Spacing(5);
+                sig.Item().Text("Authorized Signature").Bold().FontColor(primary);
+                if (signature.ImageBytes != null)
+                    sig.Item().Height(60).Image(signature.ImageBytes).FitWidth();
+                else
+                    sig.Item().Height(20).BorderBottom(1).BorderColor(Colors.Grey.Lighten3);
+
+                if (!string.IsNullOrWhiteSpace(signature.SignedBy) || signature.SignedAt.HasValue)
                 {
-                    sig.Spacing(5);
-                    sig.Item().Text("Authorized Signature").Bold().FontColor(primary);
-                    if (signature.ImageBytes != null)
-                        sig.Item().Height(60).Image(signature.ImageBytes).FitWidth();
-                    if (!string.IsNullOrWhiteSpace(signature.SignedBy) || signature.SignedAt.HasValue)
-                    {
-                        var signedLine = $"Signed by {signature.SignedBy ?? "N/A"}";
-                        if (signature.SignedAt.HasValue)
-                            signedLine += $" on {signature.SignedAt:dd MMM yyyy HH:mm}";
-                        sig.Item().Text(signedLine).FontSize(9).FontColor(secondary);
-                    }
-                    if (!string.IsNullOrWhiteSpace(signature.Notes))
-                        sig.Item().Text(signature.Notes).FontSize(9).FontColor(secondary);
-                });
-            }
+                    var signedLine = $"Signed by {signature.SignedBy ?? "N/A"}";
+                    if (signature.SignedAt.HasValue)
+                        signedLine += $" on {signature.SignedAt:dd MMM yyyy HH:mm}";
+                    sig.Item().Text(signedLine).FontSize(9).FontColor(secondary);
+                }
+                else
+                {
+                    sig.Item().Text("Signature pending").FontSize(9).FontColor(secondary);
+                }
+
+                if (!string.IsNullOrWhiteSpace(signature.Notes))
+                    sig.Item().Text(signature.Notes).FontSize(9).FontColor(secondary);
+            });
         });
 
         static IContainer HeaderCell(IContainer container, Color secondary, Color accent) =>

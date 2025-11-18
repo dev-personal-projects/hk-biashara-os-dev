@@ -194,9 +194,6 @@ public sealed class OpenXmlDocumentGenerator
 
     private static void AddSignatureSection(W.Body body, DocumentSignatureRender signature, DocumentTheme theme, MainDocumentPart mainPart)
     {
-        if (!signature.HasSignature)
-            return;
-
         body.AppendChild(CreateParagraph("Authorized Signature", bold: true, fontSize: "24", color: theme.PrimaryColor));
 
         if (signature.ImageBytes != null && signature.ImageBytes.Length > 0)
@@ -208,6 +205,11 @@ public sealed class OpenXmlDocumentGenerator
             para.AppendChild(run);
             body.AppendChild(para);
         }
+        else
+        {
+            // Placeholder line for unsigned documents
+            body.AppendChild(CreateParagraph("_______________________________", color: theme.SecondaryColor));
+        }
 
         if (!string.IsNullOrWhiteSpace(signature.SignedBy) || signature.SignedAt.HasValue)
         {
@@ -218,6 +220,10 @@ public sealed class OpenXmlDocumentGenerator
         if (!string.IsNullOrWhiteSpace(signature.Notes))
         {
             body.AppendChild(CreateParagraph(signature.Notes, color: theme.SecondaryColor));
+        }
+        else if (!signature.HasSignature)
+        {
+            body.AppendChild(CreateParagraph("Signature pending", color: theme.SecondaryColor));
         }
     }
 
