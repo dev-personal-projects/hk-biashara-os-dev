@@ -19,4 +19,5 @@ public interface IDocumentService
 
     // Update
     Task<DocumentResponse> UpdateDocumentAsync(UpdateDocumentRequest request, CancellationToken ct = default);
+    Task<DocumentResponse> SignDocumentAsync(SignDocumentRequest request, CancellationToken ct = default);
 }

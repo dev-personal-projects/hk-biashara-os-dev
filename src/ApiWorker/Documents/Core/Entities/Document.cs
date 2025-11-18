@@ -16,6 +16,7 @@ public abstract class Document
     // Ownership / scope
     public Guid BusinessId { get; set; }         // FK -> Business.Id
     public Guid CreatedByUserId { get; set; }    // FK -> AppUser.Id
+    public Guid? TemplateId { get; set; }
 
     // Identity & lifecycle
     public DocumentType Type { get; set; }
@@ -40,6 +41,13 @@ public abstract class Document
 
     // Optional pointer to NoSQL (Cosmos) for the rendered JSON snapshot
     public string? CosmosId { get; set; }
+
+    // Theme snapshot & signature metadata
+    public string? AppliedThemeJson { get; set; }
+    public string? SignatureBlobUrl { get; set; }
+    public string? SignedBy { get; set; }
+    public DateTimeOffset? SignedAt { get; set; }
+    public string? SignatureNotes { get; set; }
 
     // Audit
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;

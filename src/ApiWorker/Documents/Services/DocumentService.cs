@@ -4,12 +4,14 @@ using ApiWorker.Documents.Entities;
 using ApiWorker.Documents.Interfaces;
 using ApiWorker.Documents.Settings;
 using ApiWorker.Documents.Templates.Default;
+using ApiWorker.Documents.ValueObjects;
 using ApiWorker.Authentication.Entities;
 using ApiWorker.Authentication.Services;
 using ApiWorker.Data;
 using ApiWorker.Storage;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using System.Net.Http;
 
 namespace ApiWorker.Documents.Services;
 
@@ -26,6 +28,7 @@ public sealed class DocumentService : IDocumentService
     private readonly ICurrentUserService _currentUser;
     private readonly DocumentSettings _settings;
     private readonly ILogger<DocumentService> _logger;
+    private const string SignatureContainerName = "document-signatures";
 
     public DocumentService(
         ApplicationDbContext db,
@@ -116,6 +119,16 @@ public sealed class DocumentService : IDocumentService
                 TaxRate = 0
             }).ToList();
 
+            var themeResult = await ApplyThemeAsync(document, business.Id, request.TemplateId, request.Theme, ct);
+            if (!themeResult.Success)
+            {
+                return new DocumentResponse
+                {
+                    Success = false,
+                    Message = themeResult.ErrorMessage ?? "Unable to use the selected template or theme."
+                };
+            }
+
             document.Number = await GenerateDocumentNumberAsync(request.BusinessId, request.Type, ct);
             CalculateTotals(document);
 
@@ -150,7 +163,8 @@ public sealed class DocumentService : IDocumentService
                     Message = $"{GetDocumentTypeName(document.Type)} created from voice successfully",
                     DocumentId = document.Id,
                     DocumentNumber = document.Number,
-                    Urls = new DocumentUrls { DocxUrl = docxUrl, PdfUrl = pdfUrl, PreviewUrl = document.PreviewBlobUrl }
+                    Urls = new DocumentUrls { DocxUrl = docxUrl, PdfUrl = pdfUrl, PreviewUrl = document.PreviewBlobUrl },
+                    Signature = BuildSignatureDto(document)
                 };
             }
             catch (InvalidOperationException ex)
@@ -241,6 +255,15 @@ public sealed class DocumentService : IDocumentService
             document.BusinessId = request.BusinessId;
             document.CreatedByUserId = _currentUser.UserId ?? throw new UnauthorizedAccessException("User not authenticated");
             document.Type = request.Type;
+            var themeResult = await ApplyThemeAsync(document, business.Id, request.TemplateId, request.Theme, ct);
+            if (!themeResult.Success)
+            {
+                return new DocumentResponse
+                {
+                    Success = false,
+                    Message = themeResult.ErrorMessage ?? "Unable to use the selected template or theme."
+                };
+            }
             document.Number = await GenerateDocumentNumberAsync(request.BusinessId, request.Type, ct);
             CalculateTotals(document);
 
@@ -280,7 +303,8 @@ public sealed class DocumentService : IDocumentService
                         DocxUrl = docxUrl,
                         PdfUrl = pdfUrl,
                         PreviewUrl = document.PreviewBlobUrl
-                    }
+                    },
+                    Signature = BuildSignatureDto(document)
                 };
             }
             catch (InvalidOperationException ex)
@@ -530,7 +554,8 @@ public sealed class DocumentService : IDocumentService
                 Success = true,
                 Message = $"{GetDocumentTypeName(document.Type)} updated successfully",
                 DocumentId = document.Id,
-                DocumentNumber = document.Number
+                DocumentNumber = document.Number,
+                Signature = BuildSignatureDto(document)
             };
         }
         catch (DbUpdateException ex)
@@ -549,6 +574,125 @@ public sealed class DocumentService : IDocumentService
             {
                 Success = false,
                 Message = "Unable to update document. Please check your connection and try again."
+            };
+        }
+    }
+
+    // ===== SIGN DOCUMENT =====
+    public async Task<DocumentResponse> SignDocumentAsync(SignDocumentRequest request, CancellationToken ct = default)
+    {
+        try
+        {
+            if (request.DocumentId == Guid.Empty)
+                return new DocumentResponse
+                {
+                    Success = false,
+                    Message = "Invalid document ID. Please provide a valid document ID."
+                };
+
+            if (string.IsNullOrWhiteSpace(request.SignatureBase64))
+                return new DocumentResponse
+                {
+                    Success = false,
+                    Message = "Signature image is required."
+                };
+
+            var document = await _db.TransactionalDocuments
+                .FirstOrDefaultAsync(d => d.Id == request.DocumentId, ct);
+
+            if (document == null)
+                return new DocumentResponse
+                {
+                    Success = false,
+                    Message = "Document not found. The document may have been deleted or the ID is incorrect."
+                };
+
+            if (document.CreatedByUserId != _currentUser.UserId)
+                return new DocumentResponse
+                {
+                    Success = false,
+                    Message = "You don't have permission to sign this document."
+                };
+
+            var business = await _db.Businesses.FirstOrDefaultAsync(b => b.Id == document.BusinessId, ct);
+            if (business == null)
+                return new DocumentResponse
+                {
+                    Success = false,
+                    Message = "Business not found. Please register your business first."
+                };
+
+            byte[] signatureBytes;
+            try
+            {
+                signatureBytes = Convert.FromBase64String(request.SignatureBase64);
+            }
+            catch (FormatException)
+            {
+                return new DocumentResponse
+                {
+                    Success = false,
+                    Message = "Signature must be a valid base64 string."
+                };
+            }
+
+            if (signatureBytes.Length == 0)
+            {
+                return new DocumentResponse
+                {
+                    Success = false,
+                    Message = "Signature cannot be empty."
+                };
+            }
+
+            await using var signatureStream = new MemoryStream(signatureBytes);
+            var signatureFileName = $"{document.Number}-signature.png";
+            var signatureUrl = await _blobStorage.UploadAsync(signatureStream, signatureFileName, SignatureContainerName, "image/png", ct);
+
+            document.SignatureBlobUrl = signatureUrl;
+            document.SignedBy = request.SignerName;
+            document.SignedAt = request.SignedAt ?? DateTimeOffset.UtcNow;
+            document.SignatureNotes = request.Notes;
+            document.Status = DocumentStatus.Signed;
+            document.UpdatedAt = DateTimeOffset.UtcNow;
+
+            var (docxUrl, pdfUrl) = await RenderAndUploadAsync(document, business, ct);
+            document.DocxBlobUrl = docxUrl;
+            document.PdfBlobUrl = pdfUrl;
+
+            await _db.SaveChangesAsync(ct);
+
+            return new DocumentResponse
+            {
+                Success = true,
+                Message = $"{GetDocumentTypeName(document.Type)} signed successfully",
+                DocumentId = document.Id,
+                DocumentNumber = document.Number,
+                Urls = new DocumentUrls
+                {
+                    DocxUrl = docxUrl,
+                    PdfUrl = pdfUrl,
+                    PreviewUrl = document.PreviewBlobUrl
+                },
+                Signature = BuildSignatureDto(document)
+            };
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogError(ex, "Failed to render signed document {DocumentId}", request.DocumentId);
+            return new DocumentResponse
+            {
+                Success = false,
+                Message = $"Signature saved but failed to regenerate files. {ex.Message}"
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to sign document {DocumentId}", request.DocumentId);
+            return new DocumentResponse
+            {
+                Success = false,
+                Message = "Unable to sign document. Please try again."
             };
         }
     }
@@ -602,22 +746,22 @@ public sealed class DocumentService : IDocumentService
     {
         try
         {
-            // Generate DOCX
-            using var docxStream = OpenXmlDocumentGenerator.GenerateDocument(document, business);
+            var theme = DocumentTheme.FromJson(document.AppliedThemeJson);
+            var signature = await BuildSignatureRenderAsync(document, ct);
+
+            using var docxStream = OpenXmlDocumentGenerator.GenerateDocument(document, business, theme, signature);
             docxStream.Position = 0;
             var docxFileName = $"{document.Number}.docx";
             var containerName = GetContainerName(document.Type);
             var docxUrl = await _blobStorage.UploadAsync(docxStream, docxFileName, containerName, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ct);
 
-            // Generate PDF
-            var pdfBytes = QuestPdfDocumentGenerator.GenerateDocumentPdf(document, business);
+            var pdfBytes = QuestPdfDocumentGenerator.GenerateDocumentPdf(document, business, theme, signature);
             using var pdfStream = new MemoryStream(pdfBytes);
             pdfStream.Position = 0;
             var pdfFileName = $"{document.Number}.pdf";
             var pdfUrl = await _blobStorage.UploadAsync(pdfStream, pdfFileName, containerName, "application/pdf", ct);
 
-            // Generate PNG preview
-            var previewBytes = QuestPdfDocumentGenerator.GenerateDocumentPreview(document, business);
+            var previewBytes = QuestPdfDocumentGenerator.GenerateDocumentPreview(document, business, theme, signature);
             using var previewStream = new MemoryStream(previewBytes);
             previewStream.Position = 0;
             var previewFileName = $"{document.Number}.png";
@@ -659,5 +803,95 @@ public sealed class DocumentService : IDocumentService
         return type == DocumentType.Invoice || 
                type == DocumentType.Receipt || 
                type == DocumentType.Quotation;
+    }
+
+    private async Task<(bool Success, string? ErrorMessage)> ApplyThemeAsync(TransactionalDocument document, Guid businessId, Guid? templateId, DocumentThemeDto? inlineTheme, CancellationToken ct)
+    {
+        if (inlineTheme != null)
+        {
+            if (templateId.HasValue)
+            {
+                var template = await _db.DocumentTemplates
+                    .FirstOrDefaultAsync(t => t.Id == templateId && (t.BusinessId == null || t.BusinessId == businessId), ct);
+
+                if (template == null)
+                    return (false, "Template not found or you do not have permission to use it.");
+
+                document.TemplateId = template.Id;
+            }
+            else
+            {
+                document.TemplateId = null;
+            }
+
+            var theme = DocumentTheme.FromDto(inlineTheme);
+            document.AppliedThemeJson = theme.ToJson();
+            return (true, null);
+        }
+
+        if (templateId.HasValue)
+        {
+            var template = await _db.DocumentTemplates
+                .FirstOrDefaultAsync(t => t.Id == templateId && (t.BusinessId == null || t.BusinessId == businessId), ct);
+
+            if (template == null)
+                return (false, "Template not found or you do not have permission to use it.");
+
+            var theme = DocumentTheme.FromJson(template.ThemeJson);
+            document.TemplateId = template.Id;
+            document.AppliedThemeJson = theme.ToJson();
+            return (true, null);
+        }
+
+        document.AppliedThemeJson = DocumentTheme.Default.ToJson();
+        document.TemplateId = null;
+        return (true, null);
+    }
+
+    private async Task<DocumentSignatureRender> BuildSignatureRenderAsync(TransactionalDocument document, CancellationToken ct)
+    {
+        var bytes = await DownloadSignatureAsync(document.SignatureBlobUrl, ct);
+        return new DocumentSignatureRender
+        {
+            ImageBytes = bytes,
+            SignedBy = document.SignedBy,
+            SignedAt = document.SignedAt,
+            Notes = document.SignatureNotes
+        };
+    }
+
+    private async Task<byte[]?> DownloadSignatureAsync(string? url, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return null;
+
+        try
+        {
+            using var httpClient = new HttpClient();
+            using var response = await httpClient.GetAsync(url, ct);
+            if (!response.IsSuccessStatusCode)
+                return null;
+
+            return await response.Content.ReadAsByteArrayAsync(ct);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private DocumentSignatureDto? BuildSignatureDto(TransactionalDocument document)
+    {
+        if (string.IsNullOrWhiteSpace(document.SignatureBlobUrl) && string.IsNullOrWhiteSpace(document.SignedBy))
+            return null;
+
+        return new DocumentSignatureDto
+        {
+            IsSigned = !string.IsNullOrWhiteSpace(document.SignatureBlobUrl),
+            SignedBy = document.SignedBy,
+            SignedAt = document.SignedAt,
+            SignatureUrl = document.SignatureBlobUrl,
+            Notes = document.SignatureNotes
+        };
     }
 }

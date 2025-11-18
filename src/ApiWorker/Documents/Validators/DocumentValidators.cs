@@ -41,6 +41,12 @@ public sealed class CreateDocumentFromVoiceRequestValidator : AbstractValidator<
                 .MinimumLength(10)
                 .WithMessage("Transcript text is too short (minimum 10 characters)");
         });
+
+        When(x => x.Theme != null, () =>
+        {
+            RuleFor(x => x.Theme!)
+                .SetValidator(new DocumentThemeDtoValidator());
+        });
     }
 }
 
@@ -99,6 +105,12 @@ public sealed class CreateDocumentManuallyRequestValidator : AbstractValidator<C
             RuleFor(x => x.Notes)
                 .MaximumLength(1000)
                 .WithMessage("Notes cannot exceed 1000 characters");
+        });
+
+        When(x => x.Theme != null, () =>
+        {
+            RuleFor(x => x.Theme!)
+                .SetValidator(new DocumentThemeDtoValidator());
         });
     }
 }
@@ -256,5 +268,65 @@ public sealed class ListDocumentsRequestValidator : AbstractValidator<ListDocume
                 .MaximumLength(100)
                 .WithMessage("Search term cannot exceed 100 characters");
         });
+    }
+}
+
+// ===== THEME VALIDATOR =====
+
+public sealed class DocumentThemeDtoValidator : AbstractValidator<DocumentThemeDto>
+{
+    public DocumentThemeDtoValidator()
+    {
+        RuleFor(x => x.PrimaryColor)
+            .Must(BeHexColor).When(x => !string.IsNullOrWhiteSpace(x.PrimaryColor))
+            .WithMessage("PrimaryColor must be a HEX value like #111827");
+
+        RuleFor(x => x.SecondaryColor)
+            .Must(BeHexColor).When(x => !string.IsNullOrWhiteSpace(x.SecondaryColor))
+            .WithMessage("SecondaryColor must be a HEX value like #1F2937");
+
+        RuleFor(x => x.AccentColor)
+            .Must(BeHexColor).When(x => !string.IsNullOrWhiteSpace(x.AccentColor))
+            .WithMessage("AccentColor must be a HEX value like #F97316");
+
+        RuleFor(x => x.FontFamily)
+            .MaximumLength(64)
+            .WithMessage("Font family name is too long");
+    }
+
+    private static bool BeHexColor(string value)
+    {
+        return System.Text.RegularExpressions.Regex.IsMatch(value, "^#([0-9a-fA-F]{6})$");
+    }
+}
+
+// ===== SIGN DOCUMENT VALIDATOR =====
+
+public sealed class SignDocumentRequestValidator : AbstractValidator<SignDocumentRequest>
+{
+    public SignDocumentRequestValidator()
+    {
+        RuleFor(x => x.DocumentId)
+            .NotEmpty()
+            .WithMessage("Document ID is required");
+
+        RuleFor(x => x.SignerName)
+            .NotEmpty()
+            .MaximumLength(128);
+
+        RuleFor(x => x.SignatureBase64)
+            .NotEmpty()
+            .Must(BeBase64)
+            .WithMessage("Signature must be a valid base64 string");
+
+        RuleFor(x => x.Notes)
+            .MaximumLength(256)
+            .When(x => !string.IsNullOrWhiteSpace(x.Notes));
+    }
+
+    private static bool BeBase64(string value)
+    {
+        Span<byte> buffer = stackalloc byte[value.Length];
+        return Convert.TryFromBase64String(value, buffer, out _);
     }
 }

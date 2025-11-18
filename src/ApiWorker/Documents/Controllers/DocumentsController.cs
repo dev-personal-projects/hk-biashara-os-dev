@@ -19,17 +19,20 @@ public class DocumentsController : ControllerBase
     private readonly IValidator<CreateDocumentManuallyRequest> _manualValidator;
     private readonly IValidator<CreateDocumentFromVoiceRequest> _voiceValidator;
     private readonly IValidator<UpdateDocumentRequest> _updateValidator;
+    private readonly IValidator<SignDocumentRequest> _signValidator;
 
     public DocumentsController(
         IDocumentService documentService,
         IValidator<CreateDocumentManuallyRequest> manualValidator,
         IValidator<CreateDocumentFromVoiceRequest> voiceValidator,
-        IValidator<UpdateDocumentRequest> updateValidator)
+        IValidator<UpdateDocumentRequest> updateValidator,
+        IValidator<SignDocumentRequest> signValidator)
     {
         _documentService = documentService;
         _manualValidator = manualValidator;
         _voiceValidator = voiceValidator;
         _updateValidator = updateValidator;
+        _signValidator = signValidator;
     }
 
     /// <summary>Create document manually (Invoice, Receipt, or Quotation)</summary>
@@ -132,5 +135,36 @@ public class DocumentsController : ControllerBase
     {
         var result = await _documentService.ListDocumentsAsync(request, ct);
         return Ok(result);
+    }
+
+    /// <summary>Apply a handwritten signature to an existing document.</summary>
+    [HttpPost("{id}/sign")]
+    public async Task<ActionResult<DocumentResponse>> SignDocument(Guid id, [FromBody] SignDocumentRequest request, CancellationToken ct)
+    {
+        if (request == null)
+            return BadRequest(new DocumentResponse { Success = false, Message = "Request body is required" });
+
+        if (id != request.DocumentId)
+            return BadRequest(new DocumentResponse
+            {
+                Success = false,
+                Message = "Document ID in URL does not match the ID in request body"
+            });
+
+        var validation = await _signValidator.ValidateAsync(request, ct);
+        if (!validation.IsValid)
+        {
+            var errorMessages = validation.Errors.Select(e => e.ErrorMessage).ToList();
+            return BadRequest(new DocumentResponse
+            {
+                Success = false,
+                Message = errorMessages.Count == 1
+                    ? errorMessages.First()
+                    : $"Please fix the following errors: {string.Join("; ", errorMessages)}"
+            });
+        }
+
+        var result = await _documentService.SignDocumentAsync(request, ct);
+        return result.Success ? Ok(result) : BadRequest(result);
     }
 }

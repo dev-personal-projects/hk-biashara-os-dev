@@ -1,6 +1,7 @@
 using AutoMapper;
 using ApiWorker.Documents.DTOs;
 using ApiWorker.Documents.Entities;
+using ApiWorker.Documents.ValueObjects;
 
 namespace ApiWorker.Documents.Mappings;
 
@@ -36,7 +37,9 @@ public sealed class DocumentMappingProfile : Profile
                 DocxUrl = src.DocxBlobUrl,
                 PdfUrl = src.PdfBlobUrl,
                 PreviewUrl = src.PreviewBlobUrl
-            }));
+            }))
+            .ForMember(dest => dest.Theme, opt => opt.MapFrom(src => DocumentTheme.FromJson(src.AppliedThemeJson).ToDto()))
+            .ForMember(dest => dest.Signature, opt => opt.MapFrom(src => MapSignature(src)));
 
         /// <summary>
         /// Maps TransactionalDocumentLine entity to DocumentLineDto.
@@ -153,5 +156,20 @@ public sealed class DocumentMappingProfile : Profile
                 src.Reference ?? dest.Reference))
             .ForMember(dest => dest.UpdatedAt, opt => opt.MapFrom(src => DateTimeOffset.UtcNow))
             .ForAllMembers(opt => opt.Condition((src, dest, srcMember) => srcMember != null));
+    }
+
+    private static DocumentSignatureDto? MapSignature(TransactionalDocument document)
+    {
+        if (string.IsNullOrWhiteSpace(document.SignatureBlobUrl) && string.IsNullOrWhiteSpace(document.SignedBy))
+            return null;
+
+        return new DocumentSignatureDto
+        {
+            IsSigned = !string.IsNullOrWhiteSpace(document.SignatureBlobUrl),
+            SignedBy = document.SignedBy,
+            SignedAt = document.SignedAt,
+            SignatureUrl = document.SignatureBlobUrl,
+            Notes = document.SignatureNotes
+        };
     }
 }

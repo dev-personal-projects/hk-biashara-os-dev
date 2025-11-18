@@ -25,6 +25,9 @@ public sealed class DocumentResponse
 
     /// <summary>URLs to rendered documents (DOCX and PDF)</summary>
     public DocumentUrls? Urls { get; init; }
+
+    /// <summary>Signature info if the document has been signed.</summary>
+    public DocumentSignatureDto? Signature { get; init; }
 }
 
 /// <summary>
@@ -111,4 +114,27 @@ public sealed class ListDocumentsResponse
     public int Page { get; init; }
     public int PageSize { get; init; }
     public int TotalPages { get; init; }
+}
+
+/// <summary>
+/// Theme definition sent from/to the client to customize document colors and fonts.
+/// </summary>
+public sealed class DocumentThemeDto
+{
+    public string PrimaryColor { get; init; } = "#111827";
+    public string SecondaryColor { get; init; } = "#1F2937";
+    public string AccentColor { get; init; } = "#F97316";
+    public string FontFamily { get; init; } = "Poppins";
+}
+
+/// <summary>
+/// Signature metadata returned to clients.
+/// </summary>
+public sealed class DocumentSignatureDto
+{
+    public bool IsSigned { get; init; }
+    public string? SignedBy { get; init; }
+    public DateTimeOffset? SignedAt { get; init; }
+    public string? SignatureUrl { get; init; }
+    public string? Notes { get; init; }
 }

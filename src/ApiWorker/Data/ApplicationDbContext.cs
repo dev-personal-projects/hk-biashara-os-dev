@@ -47,6 +47,12 @@ public sealed class ApplicationDbContext : DbContext
             .HasForeignKey(d => d.CreatedByUserId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        modelBuilder.Entity<Document>()
+            .HasOne<DocTemplate>()
+            .WithMany()
+            .HasForeignKey(d => d.TemplateId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         // Foreign key relationship: DocumentTemplate -> Business
         modelBuilder.Entity<DocTemplate>()
             .HasOne<Business>()

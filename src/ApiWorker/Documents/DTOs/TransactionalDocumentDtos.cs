@@ -43,6 +43,11 @@ public sealed class CreateDocumentFromVoiceRequest
     /// If not provided, uses business default template.
     /// </summary>
     public Guid? TemplateId { get; init; }
+
+    /// <summary>
+    /// Optional inline theme definition to override template colors/fonts.
+    /// </summary>
+    public DocumentThemeDto? Theme { get; init; }
 }
 
 // ===== MANUAL DOCUMENT CREATION =====
@@ -92,6 +97,11 @@ public sealed class CreateDocumentManuallyRequest
     /// If not provided, uses business default template.
     /// </summary>
     public Guid? TemplateId { get; init; }
+
+    /// <summary>
+    /// Optional inline theme definition to override template colors/fonts.
+    /// </summary>
+    public DocumentThemeDto? Theme { get; init; }
 }
 
 // ===== DOCUMENT UPDATE (EDIT) =====
@@ -122,6 +132,29 @@ public sealed class UpdateDocumentRequest
     /// <summary>Updated reference (optional)</summary>
     [MaxLength(64)]
     public string? Reference { get; init; }
+}
+
+/// <summary>
+/// Request payload for signing an existing document.
+/// Mobile app sends the captured signature (base64 PNG) plus signer metadata.
+/// </summary>
+public sealed class SignDocumentRequest
+{
+    [Required]
+    public Guid DocumentId { get; init; }
+
+    [Required, MaxLength(128)]
+    public string SignerName { get; init; } = string.Empty;
+
+    /// <summary>Base64-encoded PNG signature image.</summary>
+    [Required]
+    public string SignatureBase64 { get; init; } = string.Empty;
+
+    [MaxLength(256)]
+    public string? Notes { get; init; }
+
+    /// <summary>Optional signed timestamp (defaults to server time)</summary>
+    public DateTimeOffset? SignedAt { get; init; }
 }
 
 // ===== SUPPORTING DTOs =====
@@ -230,6 +263,10 @@ public sealed class DocumentDto
     public string? Reference { get; init; }
 
     public DocumentUrls? Urls { get; init; }
+
+    public DocumentThemeDto? Theme { get; init; }
+
+    public DocumentSignatureDto? Signature { get; init; }
 
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset UpdatedAt { get; init; }

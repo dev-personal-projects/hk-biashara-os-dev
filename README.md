@@ -26,6 +26,7 @@
 - **Manual document builder** with customer and line items
 - Export **DOCX (OpenXML)** and **PDF (QuestPDF)**
 - Document versioning and status tracking (Draft, Final, Voided)
+- **Custom theming & signatures**: mobile users pick colors/fonts, sign on-screen, and get regenerated DOCX/PDF/preview with embedded signature
 - Auto-numbering per document type: `INV-{yyyyMM}-{####}`, `RCPT-{yyyyMM}-{####}`, `QUO-{yyyyMM}-{####}`
 - **Coming Soon**: Ledgers, Balance Sheets, OCR scan
 
@@ -200,6 +201,7 @@ Docker: http://localhost:8000/api
 - `GET /api/documents/{id}` - Get document details
 - `PUT /api/documents/{id}` - Update document (draft only)
 - `GET /api/documents` - List documents with filters (type, status, date range, search)
+- `POST /api/documents/{id}/sign` - Upload mobile signature + regenerate DOCX/PDF/preview
 
 ### Authentication Endpoints
 
@@ -454,6 +456,38 @@ final response = await http.get(
 // Handle 401 errors by refreshing token or re-authenticating
 ```
 
+#### 4. Template-first + Signature Flow (mobile UX)
+1. **Create Document Screen**
+   - User taps “Create Document”.
+   - Present tabs for `Invoice | Receipt | Quotation`.
+   - Optional theme picker (color chips + font dropdown) → map to `theme` object.
+2. **Template Selection (optional)**
+   - If you maintain template IDs locally (or via future template endpoints), set `templateId` in the payload so the API applies business-approved colors/layout.
+3. **Preview & Confirmation**
+   - After hitting `POST /api/documents`, render the returned `urls.previewUrl` directly in the app (PNG now mirrors the final PDF, including colors + signature placeholders).
+4. **Signature Capture**
+   - Show a “Sign Document” CTA that opens a canvas (e.g., `SignatureController` or `scribble` package).
+   - Convert the drawing to PNG → `base64Encode`.
+   - Call `POST /api/documents/{id}/sign` with `signatureBase64` and `signerName`.
+5. **Download / Share**
+   - Use `urls.pdfUrl` for sharing.
+   - Because the server re-generates the preview, you can refresh the preview in-app without re-creating the document.
+
+```dart
+final signature = await controller.toPngBytes();
+final payload = {
+  'documentId': docId,
+  'signerName': currentUser.name,
+  'signatureBase64': base64Encode(signature!),
+  'notes': 'Signed on delivery'
+};
+await http.post(
+  Uri.parse('$baseUrl/documents/$docId/sign'),
+  headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+  body: jsonEncode(payload),
+);
+```
+
 ### Supabase OAuth Flow (Optional)
 1. Use Supabase Auth SDK with Google provider
 2. Extract ID token from Supabase session
@@ -590,6 +624,13 @@ Content-Type: application/json
 {
   "businessId": "45bc8336-f8b7-4bdc-aaf2-1dfbea5dbaa4",
   "type": "Invoice",
+  "templateId": "a1aa7f6c-6e8c-4cd0-a2a5-08dd12345678",
+  "theme": {
+    "primaryColor": "#0F172A",
+    "secondaryColor": "#475569",
+    "accentColor": "#F97316",
+    "fontFamily": "Poppins"
+  },
   "customer": {
     "name": "Mega Logistics",
     "phone": "+254712345678",
@@ -622,6 +663,9 @@ Content-Type: application/json
   "reference": "PO-2025-001"
 }
 ```
+
+- `templateId` is optional; when provided the API validates that the business owns/has access to the template.
+- `theme` is optional and lets the mobile app override colors/fonts without uploading a new template.
 
 **Minimal Example (Required Fields Only):**
 ```json
@@ -659,7 +703,8 @@ Content-Type: application/json
     "docxUrl": "https://biasharaos.blob.core.windows.net/invoices/INV-202511-0006.docx",
     "pdfUrl": "https://biasharaos.blob.core.windows.net/invoices/INV-202511-0006.pdf",
     "previewUrl": "https://biasharaos.blob.core.windows.net/doc-previews/INV-202511-0006.png"
-  }
+  },
+  "signature": null
 }
 ```
 
@@ -668,6 +713,12 @@ Content-Type: application/json
 {
   "businessId": "45bc8336-f8b7-4bdc-aaf2-1dfbea5dbaa4",
   "type": "Receipt",
+  "theme": {
+    "primaryColor": "#065F46",
+    "secondaryColor": "#047857",
+    "accentColor": "#10B981",
+    "fontFamily": "Inter"
+  },
   "customer": {
     "name": "Jane Wanjiku",
     "phone": "+254712345678",
@@ -697,6 +748,7 @@ Content-Type: application/json
 {
   "businessId": "45bc8336-f8b7-4bdc-aaf2-1dfbea5dbaa4",
   "type": "Quotation",
+  "templateId": "f3d5d0b8-4cd1-4a9a-9910-08dd12349999",
   "customer": {
     "name": "ABC Company Ltd",
     "phone": "+254712345678",
@@ -735,6 +787,10 @@ Content-Type: application/json
   "locale": "en-KE"
 }
 ```
+
+- Optional fields:
+  - `templateId`
+  - `theme` (same structure as manual request)
 
 **Create Receipt from Voice (English):**
 ```json
@@ -822,7 +878,49 @@ Content-Type: application/json
 }
 ```
 
-#### 3. Get Document Details
+#### 3. Sign Document (after rendering)
+```http
+POST /api/documents/{documentId}/sign
+Authorization: Bearer {jwt-token}
+Content-Type: application/json
+
+{
+  "documentId": "302a871c-0c8f-4d65-17ed-08de236d7832",
+  "signerName": "Jane Wanjiku",
+  "signatureBase64": "iVBORw0KGgoAAAANSUhEUgAAAUAAAABACAYAAAD+08YQAAAAA...",
+  "notes": "Signed on delivery",
+  "signedAt": "2025-01-16T08:15:00Z"
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Invoice signed successfully",
+  "documentId": "302a871c-0c8f-4d65-17ed-08de236d7832",
+  "documentNumber": "INV-202511-0006",
+  "urls": {
+    "docxUrl": "https://biasharaos.blob.core.windows.net/invoices/INV-202511-0006.docx",
+    "pdfUrl": "https://biasharaos.blob.core.windows.net/invoices/INV-202511-0006.pdf",
+    "previewUrl": "https://biasharaos.blob.core.windows.net/doc-previews/INV-202511-0006.png"
+  },
+  "signature": {
+    "isSigned": true,
+    "signedBy": "Jane Wanjiku",
+    "signedAt": "2025-01-16T08:15:00Z",
+    "signatureUrl": "https://biasharaos.blob.core.windows.net/document-signatures/INV-202511-0006.png",
+    "notes": "Signed on delivery"
+  }
+}
+```
+
+**Tips**
+- Capture the signature on the Flutter canvas (`ui.Image → PNG → base64`) and send as `signatureBase64`.
+- The API regenerates DOCX, PDF, and preview so signatures show up everywhere (mobile preview now matches the PDF layout).
+- Signed documents move to the `Signed` status; edit endpoints will block changes until you void or clone the document.
+
+#### 4. Get Document Details
 ```http
 GET /api/documents/{documentId}
 Authorization: Bearer {jwt-token}
@@ -869,7 +967,7 @@ Authorization: Bearer {jwt-token}
 }
 ```
 
-#### 4. List Documents with Filters
+#### 5. List Documents with Filters
 ```http
 GET /api/documents?page=1&pageSize=20&type=Invoice&status=Draft&searchTerm=John
 Authorization: Bearer {jwt-token}
@@ -908,7 +1006,7 @@ Authorization: Bearer {jwt-token}
 }
 ```
 
-#### 5. Update Document (Draft Only)
+#### 6. Update Document (Draft Only)
 ```http
 PUT /api/documents/{documentId}
 Authorization: Bearer {jwt-token}
@@ -1122,6 +1220,43 @@ curl -X PUT http://localhost:5052/api/documents/{document-id} \
   }'
 ```
 
+#### Step 8: Sign Document (mobile signature → server)
+```bash
+curl -X POST http://localhost:5052/api/documents/{document-id}/sign \
+  -H "Authorization: Bearer {your-token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "documentId": "{document-id}",
+    "signerName": "Delivery Agent",
+    "signatureBase64": "{base64-png}",
+    "notes": "Signed on delivery"
+  }'
+```
+
+Expect the response to include an updated `signature` block plus refreshed DOCX/PDF/preview URLs.
+
+#### Step 9: Create a themed document
+```bash
+curl -X POST http://localhost:5052/api/documents \
+  -H "Authorization: Bearer {your-token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "businessId": "{your-business-id}",
+    "type": "Invoice",
+    "theme": {
+      "primaryColor": "#0F172A",
+      "secondaryColor": "#475569",
+      "accentColor": "#F97316",
+      "fontFamily": "Poppins"
+    },
+    "customer": { "name": "Theme Test" },
+    "lines": [{ "name": "Brand Kit", "quantity": 1, "unitPrice": 2500 }],
+    "currency": "KES"
+  }'
+```
+
+Preview image now mirrors the QuestPDF layout (full header/table/signature styling), so the mobile app can display exactly what the PDF looks like.
+
 ### How It Works
 
 #### Voice-to-Document Flow
@@ -1155,6 +1290,7 @@ curl -X PUT http://localhost:5052/api/documents/{document-id} \
   - `receipts/` - Receipt documents
   - `quotations/` - Quotation documents
   - `doc-previews/` - Preview images for all document types
+  - `document-signatures/` - Handwritten signatures uploaded from the mobile app
 
 ---
 
