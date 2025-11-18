@@ -34,7 +34,12 @@ builder.Services.AddScoped<ITranscriptionStore, CosmosTranscriptionStore>();
 builder.Services.AddScoped<ISpeechCaptureService, SpeechCaptureService>();
 
 builder.Services.AddOpenApi();
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        // Allow string enum values in JSON (e.g., "Invoice" instead of 1)
+        options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+    });
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>

@@ -2,18 +2,23 @@ using System.ComponentModel.DataAnnotations;
 
 namespace ApiWorker.Documents.DTOs;
 
-// ===== VOICE INVOICE CREATION =====
+using ApiWorker.Documents.Entities;
+
+// ===== VOICE DOCUMENT CREATION =====
 
 /// <summary>
-/// Request to create invoice from voice input.
+/// Request to create document from voice input.
 /// Mobile app records audio, optionally transcribes locally, then sends to API.
-/// Flow: User speaks → Mobile transcribes → API extracts fields → Creates invoice
 /// </summary>
-public sealed class CreateInvoiceFromVoiceRequest
+public sealed class CreateDocumentFromVoiceRequest
 {
     /// <summary>Business ID (from authenticated user context)</summary>
     [Required]
     public Guid BusinessId { get; init; }
+
+    /// <summary>Document type (Invoice, Receipt, Quotation)</summary>
+    [Required]
+    public DocumentType Type { get; init; }
 
     /// <summary>
     /// Pre-transcribed text from mobile app (if offline transcription was used).
@@ -40,25 +45,29 @@ public sealed class CreateInvoiceFromVoiceRequest
     public Guid? TemplateId { get; init; }
 }
 
-// ===== MANUAL INVOICE CREATION =====
+// ===== MANUAL DOCUMENT CREATION =====
 
 /// <summary>
-/// Request to create invoice manually (user fills form in mobile app).
-/// Provides full control over all invoice fields.
+/// Request to create document manually (user fills form in mobile app).
+/// Provides full control over all document fields.
 /// </summary>
-public sealed class CreateInvoiceManuallyRequest
+public sealed class CreateDocumentManuallyRequest
 {
     /// <summary>Business ID (from authenticated user context)</summary>
     [Required]
     public Guid BusinessId { get; init; }
 
+    /// <summary>Document type (Invoice, Receipt, Quotation)</summary>
+    [Required]
+    public DocumentType Type { get; init; }
+
     /// <summary>Customer information</summary>
     [Required]
     public CustomerDto Customer { get; init; } = new();
 
-    /// <summary>Invoice line items (products/services)</summary>
+    /// <summary>Document line items (products/services)</summary>
     [Required, MinLength(1)]
-    public List<InvoiceLineDto> Lines { get; init; } = new();
+    public List<DocumentLineDto> Lines { get; init; } = new();
 
     /// <summary>Currency code (e.g., "KES", "USD")</summary>
     [Required, StringLength(3, MinimumLength = 3)]
@@ -85,23 +94,23 @@ public sealed class CreateInvoiceManuallyRequest
     public Guid? TemplateId { get; init; }
 }
 
-// ===== INVOICE UPDATE (EDIT) =====
+// ===== DOCUMENT UPDATE (EDIT) =====
 
 /// <summary>
-/// Request to update an existing invoice (only allowed if status is Draft).
-/// Mobile app uses this when user edits a draft invoice.
+/// Request to update an existing document (only allowed if status is Draft).
+/// Mobile app uses this when user edits a draft document.
 /// </summary>
-public sealed class UpdateInvoiceRequest
+public sealed class UpdateDocumentRequest
 {
-    /// <summary>Invoice ID to update</summary>
+    /// <summary>Document ID to update</summary>
     [Required]
-    public Guid InvoiceId { get; init; }
+    public Guid DocumentId { get; init; }
 
     /// <summary>Updated customer information (optional)</summary>
     public CustomerDto? Customer { get; init; }
 
     /// <summary>Updated line items (optional - replaces all existing lines)</summary>
-    public List<InvoiceLineDto>? Lines { get; init; }
+    public List<DocumentLineDto>? Lines { get; init; }
 
     /// <summary>Updated due date (optional)</summary>
     public DateTimeOffset? DueAt { get; init; }
@@ -118,7 +127,7 @@ public sealed class UpdateInvoiceRequest
 // ===== SUPPORTING DTOs =====
 
 /// <summary>
-/// Customer information for invoices.
+/// Customer information for documents.
 /// Minimal required fields for mobile-first experience.
 /// </summary>
 public sealed class CustomerDto
@@ -153,10 +162,10 @@ public sealed class CustomerDto
 }
 
 /// <summary>
-/// Single line item on an invoice.
+/// Single line item on a document.
 /// Represents a product or service being billed.
 /// </summary>
-public sealed class InvoiceLineDto
+public sealed class DocumentLineDto
 {
     /// <summary>Product/service name (e.g., "Maize Flour 2kg")</summary>
     [Required, MaxLength(128)]
@@ -182,32 +191,33 @@ public sealed class InvoiceLineDto
     public decimal? TaxRate { get; init; }
 }
 
-// ===== INVOICE DETAIL RESPONSE =====
+// ===== DOCUMENT DETAIL RESPONSE =====
 
 /// <summary>
-/// Full invoice details for viewing/editing in mobile app.
+/// Full document details for viewing/editing in mobile app.
 /// Includes all fields and computed totals.
 /// </summary>
-public sealed class InvoiceDetailResponse
+public sealed class DocumentDetailResponse
 {
     public bool Success { get; init; }
     public string Message { get; init; } = string.Empty;
-    public InvoiceDto? Invoice { get; init; }
+    public DocumentDto? Document { get; init; }
 }
 
 /// <summary>
-/// Complete invoice data transfer object.
-/// Used for displaying invoice details in mobile app.
+/// Complete document data transfer object.
+/// Used for displaying document details in mobile app.
 /// </summary>
-public sealed class InvoiceDto
+public sealed class DocumentDto
 {
     public Guid Id { get; init; }
+    public DocumentType Type { get; init; }
     public string Number { get; init; } = string.Empty;
-    public string Status { get; init; } = string.Empty;
+    public DocumentStatus Status { get; init; }
     public string Currency { get; init; } = string.Empty;
 
     public CustomerDto Customer { get; init; } = new();
-    public List<InvoiceLineDto> Lines { get; init; } = new();
+    public List<DocumentLineDto> Lines { get; init; } = new();
 
     public decimal Subtotal { get; init; }
     public decimal Tax { get; init; }

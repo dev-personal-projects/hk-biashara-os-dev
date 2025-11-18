@@ -14,7 +14,8 @@ public sealed class DocumentConfiguration : IEntityTypeConfiguration<Document>
         // Single Table Inheritance discriminator
         b.HasDiscriminator<DocumentType>("Type")
             .HasValue<Invoice>(DocumentType.Invoice)
-            .HasValue<TransactionalDocument>(DocumentType.Invoice);
+            .HasValue<Receipt>(DocumentType.Receipt)
+            .HasValue<Quotation>(DocumentType.Quotation);
 
         // Base properties
         b.Property(x => x.Type).IsRequired();

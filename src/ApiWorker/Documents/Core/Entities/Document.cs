@@ -2,7 +2,6 @@
 // src/ApiWorker/Documents/Entities/Document.cs
 using System;
 using System.Collections.Generic;
-using ApiWorker.Documents.Enums;
 
 namespace ApiWorker.Documents.Entities;
 
@@ -52,5 +51,4 @@ public abstract class Document
     // Navigation (optional to keep compile-time independence from Auth module)
     // public Business Business { get; set; } = default!;
     // public AppUser CreatedBy { get; set; } = default!;
-    public ICollection<ShareLog> ShareLogs { get; set; } = new List<ShareLog>();
 }

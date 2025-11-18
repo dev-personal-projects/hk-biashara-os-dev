@@ -43,57 +43,6 @@ public sealed class DocumentUrls
     public string? PreviewUrl { get; init; }
 }
 
-// ===== DOCUMENT SHARING =====
-
-/// <summary>
-/// Request to share a document via WhatsApp, email, or download link.
-/// Mobile app sends this after user selects sharing method.
-/// </summary>
-public sealed class ShareDocumentRequest
-{
-    /// <summary>Document ID to share</summary>
-    [Required]
-    public Guid DocumentId { get; init; }
-
-    /// <summary>Sharing channel (WhatsApp, Email, DownloadLink, QR)</summary>
-    [Required]
-    public string Channel { get; init; } = string.Empty;
-
-    /// <summary>
-    /// Target recipient:
-    /// - For WhatsApp: Phone number with country code (e.g., "+254712345678")
-    /// - For Email: Email address
-    /// - For DownloadLink/QR: Not required
-    /// </summary>
-    public string? Target { get; init; }
-
-    /// <summary>Optional custom message to include with the document</summary>
-    [MaxLength(500)]
-    public string? Message { get; init; }
-}
-
-/// <summary>
-/// Response after sharing a document.
-/// Includes tracking information for audit trail.
-/// </summary>
-public sealed class ShareDocumentResponse
-{
-    /// <summary>Indicates if sharing succeeded</summary>
-    public bool Success { get; init; }
-
-    /// <summary>User-friendly message</summary>
-    public string Message { get; init; } = string.Empty;
-
-    /// <summary>Share log ID for tracking</summary>
-    public Guid? ShareLogId { get; init; }
-
-    /// <summary>Provider message ID (e.g., WhatsApp message ID)</summary>
-    public string? MessageId { get; init; }
-
-    /// <summary>Public URL for download (if applicable)</summary>
-    public string? PublicUrl { get; init; }
-}
-
 // ===== DOCUMENT LISTING =====
 
 /// <summary>

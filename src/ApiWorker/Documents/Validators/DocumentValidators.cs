@@ -3,20 +3,25 @@ using ApiWorker.Documents.DTOs;
 
 namespace ApiWorker.Documents.Validators;
 
-// ===== VOICE INVOICE VALIDATOR =====
+// ===== VOICE DOCUMENT VALIDATOR =====
 
 /// <summary>
-/// Validates voice invoice creation requests.
+/// Validates voice document creation requests.
 /// Ensures either transcript text or audio URL is provided (not both empty).
 /// </summary>
-public sealed class CreateInvoiceFromVoiceRequestValidator : AbstractValidator<CreateInvoiceFromVoiceRequest>
+public sealed class CreateDocumentFromVoiceRequestValidator : AbstractValidator<CreateDocumentFromVoiceRequest>
 {
-    public CreateInvoiceFromVoiceRequestValidator()
+    public CreateDocumentFromVoiceRequestValidator()
     {
         // Business ID is required (user must be authenticated)
         RuleFor(x => x.BusinessId)
             .NotEmpty()
             .WithMessage("Business ID is required");
+
+        // Document type must be valid
+        RuleFor(x => x.Type)
+            .IsInEnum()
+            .WithMessage("Document type must be Invoice, Receipt, or Quotation");
 
         // Locale must be valid (en-KE or sw-KE)
         RuleFor(x => x.Locale)
@@ -39,15 +44,15 @@ public sealed class CreateInvoiceFromVoiceRequestValidator : AbstractValidator<C
     }
 }
 
-// ===== MANUAL INVOICE VALIDATOR =====
+// ===== MANUAL DOCUMENT VALIDATOR =====
 
 /// <summary>
-/// Validates manual invoice creation requests.
+/// Validates manual document creation requests.
 /// Ensures all required fields are present and business rules are met.
 /// </summary>
-public sealed class CreateInvoiceManuallyRequestValidator : AbstractValidator<CreateInvoiceManuallyRequest>
+public sealed class CreateDocumentManuallyRequestValidator : AbstractValidator<CreateDocumentManuallyRequest>
 {
-    public CreateInvoiceManuallyRequestValidator()
+    public CreateDocumentManuallyRequestValidator()
     {
         // Business ID is required
         RuleFor(x => x.BusinessId)
@@ -67,7 +72,12 @@ public sealed class CreateInvoiceManuallyRequestValidator : AbstractValidator<Cr
 
         // Each line item must be valid
         RuleForEach(x => x.Lines)
-            .SetValidator(new InvoiceLineDtoValidator());
+            .SetValidator(new DocumentLineDtoValidator());
+
+        // Document type must be valid
+        RuleFor(x => x.Type)
+            .IsInEnum()
+            .WithMessage("Document type must be Invoice, Receipt, or Quotation");
 
         // Currency must be valid ISO code
         RuleFor(x => x.Currency)
@@ -93,20 +103,20 @@ public sealed class CreateInvoiceManuallyRequestValidator : AbstractValidator<Cr
     }
 }
 
-// ===== UPDATE INVOICE VALIDATOR =====
+// ===== UPDATE DOCUMENT VALIDATOR =====
 
 /// <summary>
-/// Validates invoice update requests.
+/// Validates document update requests.
 /// At least one field must be provided for update.
 /// </summary>
-public sealed class UpdateInvoiceRequestValidator : AbstractValidator<UpdateInvoiceRequest>
+public sealed class UpdateDocumentRequestValidator : AbstractValidator<UpdateDocumentRequest>
 {
-    public UpdateInvoiceRequestValidator()
+    public UpdateDocumentRequestValidator()
     {
-        // Invoice ID is required
-        RuleFor(x => x.InvoiceId)
+        // Document ID is required
+        RuleFor(x => x.DocumentId)
             .NotEmpty()
-            .WithMessage("Invoice ID is required");
+            .WithMessage("Document ID is required");
 
         // At least one field must be provided for update
         RuleFor(x => x)
@@ -125,7 +135,7 @@ public sealed class UpdateInvoiceRequestValidator : AbstractValidator<UpdateInvo
         When(x => x.Lines != null && x.Lines.Any(), () =>
         {
             RuleForEach(x => x.Lines)
-                .SetValidator(new InvoiceLineDtoValidator());
+                .SetValidator(new DocumentLineDtoValidator());
         });
     }
 }
@@ -165,15 +175,15 @@ public sealed class CustomerDtoValidator : AbstractValidator<CustomerDto>
     }
 }
 
-// ===== INVOICE LINE VALIDATOR =====
+// ===== DOCUMENT LINE VALIDATOR =====
 
 /// <summary>
-/// Validates invoice line items.
+/// Validates document line items.
 /// Ensures quantities and prices are positive and reasonable.
 /// </summary>
-public sealed class InvoiceLineDtoValidator : AbstractValidator<InvoiceLineDto>
+public sealed class DocumentLineDtoValidator : AbstractValidator<DocumentLineDto>
 {
-    public InvoiceLineDtoValidator()
+    public DocumentLineDtoValidator()
     {
         // Product/service name is required
         RuleFor(x => x.Name)
@@ -208,53 +218,6 @@ public sealed class InvoiceLineDtoValidator : AbstractValidator<InvoiceLineDto>
         RuleFor(x => x)
             .Must(x => x.Quantity * x.UnitPrice <= 999999999)
             .WithMessage("Line total is too large (quantity × unit price exceeds maximum)");
-    }
-}
-
-// ===== SHARE DOCUMENT VALIDATOR =====
-
-/// <summary>
-/// Validates document sharing requests.
-/// Ensures target is provided for channels that require it (WhatsApp, Email).
-/// </summary>
-public sealed class ShareDocumentRequestValidator : AbstractValidator<ShareDocumentRequest>
-{
-    public ShareDocumentRequestValidator()
-    {
-        // Document ID is required
-        RuleFor(x => x.DocumentId)
-            .NotEmpty()
-            .WithMessage("Document ID is required");
-
-        // Channel is required and must be valid
-        RuleFor(x => x.Channel)
-            .NotEmpty()
-            .Must(channel => new[] { "WhatsApp", "Email", "DownloadLink", "QR" }.Contains(channel))
-            .WithMessage("Channel must be one of: WhatsApp, Email, DownloadLink, QR");
-
-        // Target is required for WhatsApp and Email
-        When(x => x.Channel == "WhatsApp" || x.Channel == "Email", () =>
-        {
-            RuleFor(x => x.Target)
-                .NotEmpty()
-                .WithMessage("Target (phone/email) is required for this channel");
-        });
-
-        // Validate phone format for WhatsApp
-        When(x => x.Channel == "WhatsApp" && !string.IsNullOrWhiteSpace(x.Target), () =>
-        {
-            RuleFor(x => x.Target)
-                .Matches(@"^\+?[1-9]\d{1,14}$")
-                .WithMessage("Phone number must be in international format (e.g., +254712345678)");
-        });
-
-        // Validate email format for Email channel
-        When(x => x.Channel == "Email" && !string.IsNullOrWhiteSpace(x.Target), () =>
-        {
-            RuleFor(x => x.Target)
-                .EmailAddress()
-                .WithMessage("Invalid email address format");
-        });
     }
 }
 

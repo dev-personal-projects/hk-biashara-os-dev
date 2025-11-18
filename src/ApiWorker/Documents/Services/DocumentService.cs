@@ -1,1 +1,663 @@
-// orchestrates create/update/finalize/share/list/download
+using AutoMapper;
+using ApiWorker.Documents.DTOs;
+using ApiWorker.Documents.Entities;
+using ApiWorker.Documents.Interfaces;
+using ApiWorker.Documents.Settings;
+using ApiWorker.Documents.Templates.Default;
+using ApiWorker.Authentication.Entities;
+using ApiWorker.Authentication.Services;
+using ApiWorker.Data;
+using ApiWorker.Storage;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+
+namespace ApiWorker.Documents.Services;
+
+/// <summary>
+/// Generic service for all document operations (Invoice, Receipt, Quotation).
+/// Handles: Create (voice/manual), Update, List, Render.
+/// </summary>
+public sealed class DocumentService : IDocumentService
+{
+    private readonly ApplicationDbContext _db;
+    private readonly IMapper _mapper;
+    private readonly IBlobStorageService _blobStorage;
+    private readonly IVoiceIntentService _voiceIntent;
+    private readonly ICurrentUserService _currentUser;
+    private readonly DocumentSettings _settings;
+    private readonly ILogger<DocumentService> _logger;
+
+    public DocumentService(
+        ApplicationDbContext db,
+        IMapper mapper,
+        IBlobStorageService blobStorage,
+        IVoiceIntentService voiceIntent,
+        ICurrentUserService currentUser,
+        IOptions<DocumentSettings> settings,
+        ILogger<DocumentService> logger)
+    {
+        _db = db;
+        _mapper = mapper;
+        _blobStorage = blobStorage;
+        _voiceIntent = voiceIntent;
+        _currentUser = currentUser;
+        _settings = settings.Value;
+        _logger = logger;
+    }
+
+    // ===== CREATE FROM VOICE =====
+    public async Task<DocumentResponse> CreateDocumentFromVoiceAsync(CreateDocumentFromVoiceRequest request, CancellationToken ct = default)
+    {
+        try
+        {
+            // Validate document type early
+            if (!IsValidDocumentType(request.Type))
+                return new DocumentResponse 
+                { 
+                    Success = false, 
+                    Message = $"Document type must be Invoice, Receipt, or Quotation. Received: {request.Type}" 
+                };
+
+            if (string.IsNullOrWhiteSpace(request.TranscriptText) && string.IsNullOrWhiteSpace(request.AudioBlobUrl))
+                return new DocumentResponse 
+                { 
+                    Success = false, 
+                    Message = "Please provide either transcript text or audio file URL" 
+                };
+
+            var business = await _db.Businesses.FindAsync(new object[] { request.BusinessId }, ct);
+            if (business == null)
+                return new DocumentResponse 
+                { 
+                    Success = false, 
+                    Message = "Business not found. Please register your business first." 
+                };
+
+            // Extract document data from transcript using AI
+            var extracted = await _voiceIntent.ExtractDocumentDataAsync(request.TranscriptText ?? string.Empty, request.Locale ?? "en-KE", ct);
+            if (extracted?.Items == null || !extracted.Items.Any())
+                return new DocumentResponse
+                {
+                    Success = false,
+                    Message = $"Could not understand the {GetDocumentTypeName(request.Type).ToLower()} details from your voice input. Please speak clearly or use manual entry."
+                };
+
+            // Validate extracted items
+            if (extracted.Items.Any(item => item.Quantity <= 0 || item.UnitPrice < 0))
+                return new DocumentResponse
+                {
+                    Success = false,
+                    Message = "Invalid item quantities or prices detected. Please check your voice input and try again."
+                };
+
+            // Create document from extracted data
+            TransactionalDocument document = request.Type switch
+            {
+                DocumentType.Invoice => new Invoice(),
+                DocumentType.Receipt => new Receipt(),
+                DocumentType.Quotation => new Quotation(),
+                _ => throw new ArgumentException($"Unsupported document type: {request.Type}")
+            };
+
+            document.BusinessId = request.BusinessId;
+            document.CreatedByUserId = _currentUser.UserId ?? throw new UnauthorizedAccessException("User not authenticated");
+            document.Type = request.Type;
+            document.Status = DocumentStatus.Draft;
+            document.Currency = _settings.DefaultCurrency;
+            document.IssuedAt = DateTimeOffset.UtcNow;
+            document.CustomerName = extracted.CustomerName;
+            document.CustomerPhone = extracted.CustomerPhone;
+            document.Notes = extracted.Notes;
+            document.Lines = extracted.Items.Select(item => new TransactionalDocumentLine
+            {
+                Name = item.Name,
+                Quantity = item.Quantity,
+                UnitPrice = item.UnitPrice,
+                TaxRate = 0
+            }).ToList();
+
+            document.Number = await GenerateDocumentNumberAsync(request.BusinessId, request.Type, ct);
+            CalculateTotals(document);
+
+            // Add to appropriate DbSet
+            switch (request.Type)
+            {
+                case DocumentType.Invoice:
+                    _db.Invoices.Add((Invoice)document);
+                    break;
+                case DocumentType.Receipt:
+                    _db.Receipts.Add((Receipt)document);
+                    break;
+                case DocumentType.Quotation:
+                    _db.Quotations.Add((Quotation)document);
+                    break;
+            }
+
+            await _db.SaveChangesAsync(ct);
+
+            try
+            {
+                var (docxUrl, pdfUrl) = await RenderAndUploadAsync(document, business, ct);
+                document.DocxBlobUrl = docxUrl;
+                document.PdfBlobUrl = pdfUrl;
+                await _db.SaveChangesAsync(ct);
+
+                _logger.LogInformation("Voice document created: {DocumentNumber} ({Type})", document.Number, document.Type);
+
+                return new DocumentResponse
+                {
+                    Success = true,
+                    Message = $"{GetDocumentTypeName(document.Type)} created from voice successfully",
+                    DocumentId = document.Id,
+                    DocumentNumber = document.Number,
+                    Urls = new DocumentUrls { DocxUrl = docxUrl, PdfUrl = pdfUrl, PreviewUrl = document.PreviewBlobUrl }
+                };
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogError(ex, "Failed to render document {DocumentNumber}", document.Number);
+                // Document is saved but rendering failed - return partial success
+                return new DocumentResponse
+                {
+                    Success = false,
+                    Message = $"Document saved but failed to generate files. {ex.Message}"
+                };
+            }
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning(ex, "Invalid document type requested: {Type}", request.Type);
+            return new DocumentResponse
+            {
+                Success = false,
+                Message = $"Invalid document type. Please use Invoice, Receipt, or Quotation."
+            };
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return new DocumentResponse
+            {
+                Success = false,
+                Message = "You must be logged in to create documents. Please sign in and try again."
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to create document from voice");
+            return new DocumentResponse
+            {
+                Success = false,
+                Message = "Unable to process voice input. Please check your connection and try again, or use manual entry."
+            };
+        }
+    }
+
+    // ===== CREATE MANUALLY =====
+    public async Task<DocumentResponse> CreateDocumentManuallyAsync(CreateDocumentManuallyRequest request, CancellationToken ct = default)
+    {
+        try
+        {
+            // Validate document type early
+            if (!IsValidDocumentType(request.Type))
+                return new DocumentResponse 
+                { 
+                    Success = false, 
+                    Message = $"Document type must be Invoice, Receipt, or Quotation. Received: {request.Type}" 
+                };
+
+            var business = await _db.Businesses.FindAsync(new object[] { request.BusinessId }, ct);
+            if (business == null)
+                return new DocumentResponse 
+                { 
+                    Success = false, 
+                    Message = "Business not found. Please register your business first." 
+                };
+
+            // Validate lines are not empty
+            if (request.Lines == null || !request.Lines.Any())
+                return new DocumentResponse
+                {
+                    Success = false,
+                    Message = "At least one line item is required. Please add products or services to your document."
+                };
+
+            // Validate currency
+            if (string.IsNullOrWhiteSpace(request.Currency) || request.Currency.Length != 3)
+                return new DocumentResponse
+                {
+                    Success = false,
+                    Message = "Currency must be a 3-letter code (e.g., KES, USD, EUR)"
+                };
+
+            // Create document based on type
+            TransactionalDocument document = request.Type switch
+            {
+                DocumentType.Invoice => _mapper.Map<Invoice>(request),
+                DocumentType.Receipt => _mapper.Map<Receipt>(request),
+                DocumentType.Quotation => _mapper.Map<Quotation>(request),
+                _ => throw new ArgumentException($"Unsupported document type: {request.Type}")
+            };
+
+            document.BusinessId = request.BusinessId;
+            document.CreatedByUserId = _currentUser.UserId ?? throw new UnauthorizedAccessException("User not authenticated");
+            document.Type = request.Type;
+            document.Number = await GenerateDocumentNumberAsync(request.BusinessId, request.Type, ct);
+            CalculateTotals(document);
+
+            // Add to appropriate DbSet
+            switch (request.Type)
+            {
+                case DocumentType.Invoice:
+                    _db.Invoices.Add((Invoice)document);
+                    break;
+                case DocumentType.Receipt:
+                    _db.Receipts.Add((Receipt)document);
+                    break;
+                case DocumentType.Quotation:
+                    _db.Quotations.Add((Quotation)document);
+                    break;
+            }
+
+            await _db.SaveChangesAsync(ct);
+
+            try
+            {
+                var (docxUrl, pdfUrl) = await RenderAndUploadAsync(document, business, ct);
+                document.DocxBlobUrl = docxUrl;
+                document.PdfBlobUrl = pdfUrl;
+                await _db.SaveChangesAsync(ct);
+
+                _logger.LogInformation("Document created: {DocumentNumber} ({Type}) for business {BusinessId}", document.Number, document.Type, business.Id);
+
+                return new DocumentResponse
+                {
+                    Success = true,
+                    Message = $"{GetDocumentTypeName(document.Type)} created successfully",
+                    DocumentId = document.Id,
+                    DocumentNumber = document.Number,
+                    Urls = new DocumentUrls
+                    {
+                        DocxUrl = docxUrl,
+                        PdfUrl = pdfUrl,
+                        PreviewUrl = document.PreviewBlobUrl
+                    }
+                };
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogError(ex, "Failed to render document {DocumentNumber}", document.Number);
+                // Document is saved but rendering failed - return partial success
+                return new DocumentResponse
+                {
+                    Success = false,
+                    Message = $"Document saved but failed to generate files. {ex.Message}"
+                };
+            }
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning(ex, "Invalid document type requested: {Type}", request.Type);
+            return new DocumentResponse
+            {
+                Success = false,
+                Message = $"Invalid document type. Please use Invoice, Receipt, or Quotation."
+            };
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return new DocumentResponse
+            {
+                Success = false,
+                Message = "You must be logged in to create documents. Please sign in and try again."
+            };
+        }
+        catch (DbUpdateException ex)
+        {
+            _logger.LogError(ex, "Database error while creating document");
+            return new DocumentResponse
+            {
+                Success = false,
+                Message = "Unable to save document. Please check your input and try again."
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to create document manually");
+            return new DocumentResponse
+            {
+                Success = false,
+                Message = "Unable to create document. Please check your input and try again."
+            };
+        }
+    }
+
+    // ===== GET DOCUMENT =====
+    public async Task<DocumentDetailResponse> GetDocumentAsync(Guid documentId, CancellationToken ct = default)
+    {
+        try
+        {
+            if (documentId == Guid.Empty)
+                return new DocumentDetailResponse
+                {
+                    Success = false,
+                    Message = "Invalid document ID. Please provide a valid document ID."
+                };
+
+            var document = await _db.TransactionalDocuments
+                .Include(d => d.Lines)
+                .FirstOrDefaultAsync(d => d.Id == documentId, ct);
+
+            if (document == null)
+                return new DocumentDetailResponse
+                {
+                    Success = false,
+                    Message = "Document not found. The document may have been deleted or the ID is incorrect."
+                };
+
+            // Check if user has access to this document
+            if (document.CreatedByUserId != _currentUser.UserId)
+                return new DocumentDetailResponse
+                {
+                    Success = false,
+                    Message = "You don't have permission to view this document."
+                };
+
+            var documentDto = _mapper.Map<DocumentDto>(document);
+
+            return new DocumentDetailResponse
+            {
+                Success = true,
+                Message = $"{GetDocumentTypeName(document.Type)} retrieved successfully",
+                Document = documentDto
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get document {DocumentId}", documentId);
+            return new DocumentDetailResponse
+            {
+                Success = false,
+                Message = "Unable to retrieve document. Please check your connection and try again."
+            };
+        }
+    }
+
+    // ===== LIST DOCUMENTS =====
+    public async Task<ListDocumentsResponse> ListDocumentsAsync(ListDocumentsRequest request, CancellationToken ct = default)
+    {
+        try
+        {
+            var query = _db.TransactionalDocuments.AsQueryable();
+
+            // Apply filters
+            if (request.Type.HasValue)
+                query = query.Where(d => d.Type == request.Type.Value);
+
+            if (request.Status.HasValue)
+                query = query.Where(d => d.Status == request.Status.Value);
+
+            if (request.FromDate.HasValue)
+                query = query.Where(d => d.IssuedAt >= request.FromDate.Value);
+
+            if (request.ToDate.HasValue)
+                query = query.Where(d => d.IssuedAt <= request.ToDate.Value);
+
+            if (!string.IsNullOrWhiteSpace(request.SearchTerm))
+            {
+                var searchTerm = request.SearchTerm.ToLower();
+                query = query.Where(d => 
+                    d.Number.ToLower().Contains(searchTerm) ||
+                    (d.CustomerName != null && d.CustomerName.ToLower().Contains(searchTerm)));
+            }
+
+            var totalCount = await query.CountAsync(ct);
+
+            var documents = await query
+                .OrderByDescending(d => d.CreatedAt)
+                .Skip((request.Page - 1) * request.PageSize)
+                .Take(request.PageSize)
+                .ToListAsync(ct);
+
+            var summaries = _mapper.Map<List<DocumentSummary>>(documents);
+
+            return new ListDocumentsResponse
+            {
+                Success = true,
+                Message = $"Found {totalCount} documents",
+                Documents = summaries,
+                TotalCount = totalCount,
+                Page = request.Page,
+                PageSize = request.PageSize,
+                TotalPages = (int)Math.Ceiling(totalCount / (double)request.PageSize)
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to list documents");
+            return new ListDocumentsResponse
+            {
+                Success = false,
+                Message = "Unable to retrieve documents. Please try again."
+            };
+        }
+    }
+
+    // ===== UPDATE DOCUMENT =====
+    public async Task<DocumentResponse> UpdateDocumentAsync(UpdateDocumentRequest request, CancellationToken ct = default)
+    {
+        try
+        {
+            if (request.DocumentId == Guid.Empty)
+                return new DocumentResponse 
+                { 
+                    Success = false, 
+                    Message = "Invalid document ID. Please provide a valid document ID." 
+                };
+
+            var document = await _db.TransactionalDocuments
+                .Include(d => d.Lines)
+                .FirstOrDefaultAsync(d => d.Id == request.DocumentId, ct);
+
+            if (document == null)
+                return new DocumentResponse 
+                { 
+                    Success = false, 
+                    Message = "Document not found. The document may have been deleted or the ID is incorrect." 
+                };
+
+            // Check if user has access to this document
+            if (document.CreatedByUserId != _currentUser.UserId)
+                return new DocumentResponse
+                {
+                    Success = false,
+                    Message = "You don't have permission to edit this document."
+                };
+
+            if (document.Status != DocumentStatus.Draft)
+                return new DocumentResponse
+                {
+                    Success = false,
+                    Message = $"This {GetDocumentTypeName(document.Type).ToLower()} cannot be edited because it's already finalized. Only draft documents can be edited."
+                };
+
+            // Update fields
+            if (request.Customer != null)
+            {
+                document.CustomerName = request.Customer.Name;
+                document.CustomerPhone = request.Customer.Phone;
+                document.CustomerEmail = request.Customer.Email;
+            }
+
+            if (request.Lines != null && request.Lines.Any())
+            {
+                // Validate lines before updating
+                if (request.Lines.Any(line => line.Quantity <= 0))
+                    return new DocumentResponse
+                    {
+                        Success = false,
+                        Message = "All line items must have a quantity greater than 0."
+                    };
+
+                if (request.Lines.Any(line => line.UnitPrice < 0))
+                    return new DocumentResponse
+                    {
+                        Success = false,
+                        Message = "Item prices cannot be negative."
+                    };
+
+                _db.TransactionalDocumentLines.RemoveRange(document.Lines);
+                document.Lines = _mapper.Map<List<TransactionalDocumentLine>>(request.Lines);
+                CalculateTotals(document);
+            }
+
+            if (request.DueAt.HasValue)
+                document.DueAt = request.DueAt;
+
+            if (!string.IsNullOrWhiteSpace(request.Notes))
+                document.Notes = request.Notes;
+
+            if (!string.IsNullOrWhiteSpace(request.Reference))
+                document.Reference = request.Reference;
+
+            document.UpdatedAt = DateTimeOffset.UtcNow;
+
+            await _db.SaveChangesAsync(ct);
+
+            _logger.LogInformation("Document updated: {DocumentNumber}", document.Number);
+
+            return new DocumentResponse
+            {
+                Success = true,
+                Message = $"{GetDocumentTypeName(document.Type)} updated successfully",
+                DocumentId = document.Id,
+                DocumentNumber = document.Number
+            };
+        }
+        catch (DbUpdateException ex)
+        {
+            _logger.LogError(ex, "Database error while updating document {DocumentId}", request.DocumentId);
+            return new DocumentResponse
+            {
+                Success = false,
+                Message = "Unable to save changes. Please check your input and try again."
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update document {DocumentId}", request.DocumentId);
+            return new DocumentResponse
+            {
+                Success = false,
+                Message = "Unable to update document. Please check your connection and try again."
+            };
+        }
+    }
+
+    // ===== HELPER METHODS =====
+
+    private async Task<string> GenerateDocumentNumberAsync(Guid businessId, DocumentType type, CancellationToken ct)
+    {
+        var prefix = type switch
+        {
+            DocumentType.Invoice => _settings.Numbering.InvoicePrefix,
+            DocumentType.Receipt => _settings.Numbering.ReceiptPrefix,
+            DocumentType.Quotation => _settings.Numbering.QuotationPrefix,
+            _ => "DOC-"
+        };
+
+        // Get last document of this type for this business
+        var lastDocument = await _db.TransactionalDocuments
+            .Where(d => d.BusinessId == businessId && d.Type == type)
+            .OrderByDescending(d => d.CreatedAt)
+            .FirstOrDefaultAsync(ct);
+
+        var sequence = 1;
+        if (lastDocument != null)
+        {
+            var parts = lastDocument.Number.Split('-');
+            if (parts.Length > 0 && int.TryParse(parts[^1], out var lastSeq))
+                sequence = lastSeq + 1;
+        }
+
+        var yearMonth = DateTimeOffset.UtcNow.ToString("yyyyMM");
+        return $"{prefix}{yearMonth}-{sequence:D4}";
+    }
+
+    private void CalculateTotals(TransactionalDocument document)
+    {
+        document.Subtotal = 0;
+        document.Tax = 0;
+
+        foreach (var line in document.Lines)
+        {
+            line.LineTotal = line.Quantity * line.UnitPrice;
+            document.Subtotal += line.LineTotal;
+            document.Tax += line.LineTotal * line.TaxRate;
+        }
+
+        document.Total = document.Subtotal + document.Tax;
+    }
+
+    private async Task<(string docxUrl, string pdfUrl)> RenderAndUploadAsync(TransactionalDocument document, Business business, CancellationToken ct)
+    {
+        try
+        {
+            // Generate DOCX
+            using var docxStream = OpenXmlDocumentGenerator.GenerateDocument(document, business);
+            docxStream.Position = 0;
+            var docxFileName = $"{document.Number}.docx";
+            var containerName = GetContainerName(document.Type);
+            var docxUrl = await _blobStorage.UploadAsync(docxStream, docxFileName, containerName, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ct);
+
+            // Generate PDF
+            var pdfBytes = QuestPdfDocumentGenerator.GenerateDocumentPdf(document, business);
+            using var pdfStream = new MemoryStream(pdfBytes);
+            pdfStream.Position = 0;
+            var pdfFileName = $"{document.Number}.pdf";
+            var pdfUrl = await _blobStorage.UploadAsync(pdfStream, pdfFileName, containerName, "application/pdf", ct);
+
+            // Generate PNG preview
+            var previewBytes = QuestPdfDocumentGenerator.GenerateDocumentPreview(document, business);
+            using var previewStream = new MemoryStream(previewBytes);
+            previewStream.Position = 0;
+            var previewFileName = $"{document.Number}.png";
+            document.PreviewBlobUrl = await _blobStorage.UploadAsync(previewStream, previewFileName, "doc-previews", "image/png", ct);
+
+            return (docxUrl, pdfUrl);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to render or upload document {DocumentNumber}", document.Number);
+            throw new InvalidOperationException($"Failed to generate {GetDocumentTypeName(document.Type).ToLower()} files. Please try again.", ex);
+        }
+    }
+
+    private static string GetContainerName(DocumentType type)
+    {
+        return type switch
+        {
+            DocumentType.Invoice => "invoices",
+            DocumentType.Receipt => "receipts",
+            DocumentType.Quotation => "quotations",
+            _ => "documents"
+        };
+    }
+
+    private static string GetDocumentTypeName(DocumentType type)
+    {
+        return type switch
+        {
+            DocumentType.Invoice => "Invoice",
+            DocumentType.Receipt => "Receipt",
+            DocumentType.Quotation => "Quotation",
+            _ => "Document"
+        };
+    }
+
+    private static bool IsValidDocumentType(DocumentType type)
+    {
+        return type == DocumentType.Invoice || 
+               type == DocumentType.Receipt || 
+               type == DocumentType.Quotation;
+    }
+}

@@ -7,21 +7,19 @@ using DW = DocumentFormat.OpenXml.Drawing.Wordprocessing;
 using PIC = DocumentFormat.OpenXml.Drawing.Pictures;
 using W = DocumentFormat.OpenXml.Wordprocessing;
 using WordDocument = DocumentFormat.OpenXml.Wordprocessing.Document;
-using Table = DocumentFormat.OpenXml.Drawing.Table;
-using TableProperties = DocumentFormat.OpenXml.Drawing.TableProperties;
 
 namespace ApiWorker.Documents.Services;
 
 /// <summary>
-/// Generates invoice DOCX files programmatically using OpenXML.
-/// No template needed - creates document from scratch.
+/// Generates DOCX files for transactional documents (Invoice, Receipt, Quotation).
+/// Creates documents from scratch using OpenXML.
 /// </summary>
-public sealed class OpenXmlInvoiceGenerator
+public sealed class OpenXmlDocumentGenerator
 {
     /// <summary>
-    /// Creates an invoice DOCX and returns the file stream.
+    /// Creates a DOCX document for a transactional document and returns the file stream.
     /// </summary>
-    public static MemoryStream GenerateInvoice(Invoice invoice, Business business)
+    public static MemoryStream GenerateDocument(TransactionalDocument document, Business business)
     {
         var stream = new MemoryStream();
 
@@ -31,31 +29,45 @@ public sealed class OpenXmlInvoiceGenerator
             mainPart.Document = new WordDocument(new W.Body());
             var body = mainPart.Document.Body!;
 
-            // Header: Business info and invoice details
-            AddBusinessHeader(body, business, invoice, mainPart);
+            // Get document title based on type
+            var documentTitle = GetDocumentTitle(document.Type);
+
+            // Header: Business info and document details
+            AddBusinessHeader(body, business, document, documentTitle, mainPart);
             AddSpacer(body);
 
             // Customer info
-            AddCustomerSection(body, invoice);
+            AddCustomerSection(body, document);
             AddSpacer(body);
 
             // Line items table
-            AddLineItemsTable(body, invoice);
+            AddLineItemsTable(body, document);
             AddSpacer(body);
 
             // Totals
-            AddTotalsSection(body, invoice);
+            AddTotalsSection(body, document);
             AddSpacer(body);
 
             // Footer: Notes and reference
-            AddFooter(body, invoice);
+            AddFooter(body, document);
         }
 
         stream.Position = 0;
         return stream;
     }
 
-    private static void AddBusinessHeader(W.Body body, Business business, Invoice invoice, MainDocumentPart mainPart)
+    private static string GetDocumentTitle(DocumentType type)
+    {
+        return type switch
+        {
+            DocumentType.Invoice => "INVOICE",
+            DocumentType.Receipt => "RECEIPT",
+            DocumentType.Quotation => "QUOTATION",
+            _ => "DOCUMENT"
+        };
+    }
+
+    private static void AddBusinessHeader(W.Body body, Business business, TransactionalDocument document, string documentTitle, MainDocumentPart mainPart)
     {
         // Add logo if available
         if (!string.IsNullOrEmpty(business.LogoUrl))
@@ -79,39 +91,40 @@ public sealed class OpenXmlInvoiceGenerator
 
         AddSpacer(body);
 
-        // Invoice title and number (right-aligned)
-        body.AppendChild(CreateParagraph("INVOICE", bold: true, fontSize: "28", alignment: W.JustificationValues.Right));
-        body.AppendChild(CreateParagraph($"#{invoice.Number}", fontSize: "20", alignment: W.JustificationValues.Right));
-        body.AppendChild(CreateParagraph($"Date: {invoice.IssuedAt:dd/MM/yyyy}", alignment: W.JustificationValues.Right));
+        // Document title and number (right-aligned)
+        body.AppendChild(CreateParagraph(documentTitle, bold: true, fontSize: "28", alignment: W.JustificationValues.Right));
+        body.AppendChild(CreateParagraph($"#{document.Number}", fontSize: "20", alignment: W.JustificationValues.Right));
+        body.AppendChild(CreateParagraph($"Date: {document.IssuedAt:dd/MM/yyyy}", alignment: W.JustificationValues.Right));
 
-        if (invoice.DueAt.HasValue)
-            body.AppendChild(CreateParagraph($"Due: {invoice.DueAt:dd/MM/yyyy}", alignment: W.JustificationValues.Right));
+        if (document.DueAt.HasValue)
+            body.AppendChild(CreateParagraph($"Due: {document.DueAt:dd/MM/yyyy}", alignment: W.JustificationValues.Right));
     }
 
-    private static void AddCustomerSection(W.Body body, Invoice invoice)
+    private static void AddCustomerSection(W.Body body, TransactionalDocument document)
     {
-        body.AppendChild(CreateParagraph("BILL TO:", bold: true));
-        body.AppendChild(CreateParagraph(invoice.CustomerName ?? ""));
+        var customerLabel = document.Type == DocumentType.Receipt ? "PAID BY:" : "BILL TO:";
+        body.AppendChild(CreateParagraph(customerLabel, bold: true));
+        body.AppendChild(CreateParagraph(document.CustomerName ?? ""));
 
-        if (!string.IsNullOrEmpty(invoice.CustomerPhone))
-            body.AppendChild(CreateParagraph(invoice.CustomerPhone));
-        if (!string.IsNullOrEmpty(invoice.CustomerEmail))
-            body.AppendChild(CreateParagraph(invoice.CustomerEmail));
-        if (!string.IsNullOrEmpty(invoice.BillingAddressLine1))
-            body.AppendChild(CreateParagraph(invoice.BillingAddressLine1));
-        if (!string.IsNullOrEmpty(invoice.BillingAddressLine2))
-            body.AppendChild(CreateParagraph(invoice.BillingAddressLine2));
-        if (!string.IsNullOrEmpty(invoice.BillingCity) || !string.IsNullOrEmpty(invoice.BillingCountry))
-            body.AppendChild(CreateParagraph($"{invoice.BillingCity}{(string.IsNullOrEmpty(invoice.BillingCity) || string.IsNullOrEmpty(invoice.BillingCountry) ? "" : ", ")}{invoice.BillingCountry}"));
+        if (!string.IsNullOrEmpty(document.CustomerPhone))
+            body.AppendChild(CreateParagraph(document.CustomerPhone));
+        if (!string.IsNullOrEmpty(document.CustomerEmail))
+            body.AppendChild(CreateParagraph(document.CustomerEmail));
+        if (!string.IsNullOrEmpty(document.BillingAddressLine1))
+            body.AppendChild(CreateParagraph(document.BillingAddressLine1));
+        if (!string.IsNullOrEmpty(document.BillingAddressLine2))
+            body.AppendChild(CreateParagraph(document.BillingAddressLine2));
+        if (!string.IsNullOrEmpty(document.BillingCity) || !string.IsNullOrEmpty(document.BillingCountry))
+            body.AppendChild(CreateParagraph($"{document.BillingCity}{(string.IsNullOrEmpty(document.BillingCity) || string.IsNullOrEmpty(document.BillingCountry) ? "" : ", ")}{document.BillingCountry}"));
         
-        if (!string.IsNullOrEmpty(invoice.Reference))
+        if (!string.IsNullOrEmpty(document.Reference))
         {
             AddSpacer(body);
-            body.AppendChild(CreateParagraph($"Reference: {invoice.Reference}", fontSize: "20"));
+            body.AppendChild(CreateParagraph($"Reference: {document.Reference}", fontSize: "20"));
         }
     }
 
-    private static void AddLineItemsTable(W.Body body, Invoice invoice)
+    private static void AddLineItemsTable(W.Body body, TransactionalDocument document)
     {
         var table = new W.Table();
 
@@ -140,15 +153,15 @@ public sealed class OpenXmlInvoiceGenerator
         table.AppendChild(headerRow);
 
         // Data rows
-        foreach (var line in invoice.Lines)
+        foreach (var line in document.Lines)
         {
             var row = new W.TableRow();
             row.Append(
                 CreateTableCell(line.Name),
                 CreateTableCell(line.Quantity.ToString("N2")),
-                CreateTableCell($"{invoice.Currency} {line.UnitPrice:N2}"),
+                CreateTableCell($"{document.Currency} {line.UnitPrice:N2}"),
                 CreateTableCell($"{line.TaxRate * 100:N0}%"),
-                CreateTableCell($"{invoice.Currency} {line.LineTotal:N2}")
+                CreateTableCell($"{document.Currency} {line.LineTotal:N2}")
             );
             table.AppendChild(row);
         }
@@ -156,23 +169,23 @@ public sealed class OpenXmlInvoiceGenerator
         body.AppendChild(table);
     }
 
-    private static void AddTotalsSection(W.Body body, Invoice invoice)
+    private static void AddTotalsSection(W.Body body, TransactionalDocument document)
     {
-        body.AppendChild(CreateParagraph($"Subtotal: {invoice.Currency} {invoice.Subtotal:N2}", alignment: W.JustificationValues.Right));
-        body.AppendChild(CreateParagraph($"Tax: {invoice.Currency} {invoice.Tax:N2}", alignment: W.JustificationValues.Right));
-        body.AppendChild(CreateParagraph($"TOTAL: {invoice.Currency} {invoice.Total:N2}", bold: true, fontSize: "24", alignment: W.JustificationValues.Right));
+        body.AppendChild(CreateParagraph($"Subtotal: {document.Currency} {document.Subtotal:N2}", alignment: W.JustificationValues.Right));
+        body.AppendChild(CreateParagraph($"Tax: {document.Currency} {document.Tax:N2}", alignment: W.JustificationValues.Right));
+        body.AppendChild(CreateParagraph($"TOTAL: {document.Currency} {document.Total:N2}", bold: true, fontSize: "24", alignment: W.JustificationValues.Right));
     }
 
-    private static void AddFooter(W.Body body, Invoice invoice)
+    private static void AddFooter(W.Body body, TransactionalDocument document)
     {
-        if (!string.IsNullOrEmpty(invoice.Notes))
+        if (!string.IsNullOrEmpty(document.Notes))
         {
             body.AppendChild(CreateParagraph("Notes:", bold: true));
-            body.AppendChild(CreateParagraph(invoice.Notes));
+            body.AppendChild(CreateParagraph(document.Notes));
         }
 
-        if (!string.IsNullOrEmpty(invoice.Reference))
-            body.AppendChild(CreateParagraph($"Reference: {invoice.Reference}"));
+        if (!string.IsNullOrEmpty(document.Reference))
+            body.AppendChild(CreateParagraph($"Reference: {document.Reference}"));
     }
 
     // Helper methods
