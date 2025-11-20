@@ -75,6 +75,15 @@ public sealed class DocumentService : IDocumentService
                     Message = "Please provide either transcript text or audio file URL" 
                 };
 
+            // SECURITY: Verify user has access to the requested business
+            var (hasAccess, accessError) = await ValidateBusinessAccessAsync(request.BusinessId, ct);
+            if (!hasAccess)
+                return new DocumentResponse
+                {
+                    Success = false,
+                    Message = accessError ?? "You don't have permission to create documents for this business."
+                };
+
             var business = await _db.Businesses.FindAsync(new object[] { request.BusinessId }, ct);
             if (business == null)
                 return new DocumentResponse 
@@ -226,6 +235,15 @@ public sealed class DocumentService : IDocumentService
                     Message = $"Document type must be Invoice, Receipt, or Quotation. Received: {request.Type}" 
                 };
 
+            // SECURITY: Verify user has access to the requested business
+            var (hasAccess, accessError) = await ValidateBusinessAccessAsync(request.BusinessId, ct);
+            if (!hasAccess)
+                return new DocumentResponse
+                {
+                    Success = false,
+                    Message = accessError ?? "You don't have permission to create documents for this business."
+                };
+
             var business = await _db.Businesses.FindAsync(new object[] { request.BusinessId }, ct);
             if (business == null)
                 return new DocumentResponse 
@@ -374,9 +392,17 @@ public sealed class DocumentService : IDocumentService
                     Message = "Invalid document ID. Please provide a valid document ID."
                 };
 
+            // SECURITY: Filter by business to prevent unauthorized access
+            if (!_currentUser.BusinessId.HasValue)
+                return new DocumentDetailResponse
+                {
+                    Success = false,
+                    Message = "No active business context. Please select a business first."
+                };
+
             var document = await _db.TransactionalDocuments
                 .Include(d => d.Lines)
-                .FirstOrDefaultAsync(d => d.Id == documentId, ct);
+                .FirstOrDefaultAsync(d => d.Id == documentId && d.BusinessId == _currentUser.BusinessId.Value, ct);
 
             if (document == null)
                 return new DocumentDetailResponse
@@ -386,7 +412,7 @@ public sealed class DocumentService : IDocumentService
                 };
 
             // Check if user has access to this document
-            if (document.CreatedByUserId != _currentUser.UserId)
+            if (!_currentUser.UserId.HasValue || document.CreatedByUserId != _currentUser.UserId.Value)
                 return new DocumentDetailResponse
                 {
                     Success = false,
@@ -418,7 +444,21 @@ public sealed class DocumentService : IDocumentService
     {
         try
         {
-            var query = _db.TransactionalDocuments.AsQueryable();
+            // SECURITY: Filter by current user's business to prevent data leakage
+            if (!_currentUser.BusinessId.HasValue)
+                return new ListDocumentsResponse
+                {
+                    Success = false,
+                    Message = "No active business context. Please select a business first.",
+                    Documents = new List<DocumentSummary>(),
+                    TotalCount = 0,
+                    Page = request.Page,
+                    PageSize = request.PageSize,
+                    TotalPages = 0
+                };
+
+            var query = _db.TransactionalDocuments
+                .Where(d => d.BusinessId == _currentUser.BusinessId.Value);
 
             // Apply filters
             if (request.Type.HasValue)
@@ -485,9 +525,17 @@ public sealed class DocumentService : IDocumentService
                     Message = "Invalid document ID. Please provide a valid document ID." 
                 };
 
+            // SECURITY: Filter by business to prevent unauthorized access
+            if (!_currentUser.BusinessId.HasValue)
+                return new DocumentResponse
+                {
+                    Success = false,
+                    Message = "No active business context. Please select a business first."
+                };
+
             var document = await _db.TransactionalDocuments
                 .Include(d => d.Lines)
-                .FirstOrDefaultAsync(d => d.Id == request.DocumentId, ct);
+                .FirstOrDefaultAsync(d => d.Id == request.DocumentId && d.BusinessId == _currentUser.BusinessId.Value, ct);
 
             if (document == null)
                 return new DocumentResponse 
@@ -497,7 +545,7 @@ public sealed class DocumentService : IDocumentService
                 };
 
             // Check if user has access to this document
-            if (document.CreatedByUserId != _currentUser.UserId)
+            if (!_currentUser.UserId.HasValue || document.CreatedByUserId != _currentUser.UserId.Value)
                 return new DocumentResponse
                 {
                     Success = false,
@@ -588,6 +636,7 @@ public sealed class DocumentService : IDocumentService
     // ===== SIGN DOCUMENT =====
     public async Task<DocumentResponse> SignDocumentAsync(SignDocumentRequest request, CancellationToken ct = default)
     {
+        TransactionalDocument? document = null;
         try
         {
             if (request.DocumentId == Guid.Empty)
@@ -604,8 +653,17 @@ public sealed class DocumentService : IDocumentService
                     Message = "Signature image is required."
                 };
 
-            var document = await _db.TransactionalDocuments
-                .FirstOrDefaultAsync(d => d.Id == request.DocumentId, ct);
+            // SECURITY: Filter by business to prevent unauthorized access
+            if (!_currentUser.BusinessId.HasValue)
+                return new DocumentResponse
+                {
+                    Success = false,
+                    Message = "No active business context. Please select a business first."
+                };
+
+            document = await _db.TransactionalDocuments
+                .Include(d => d.Lines)
+                .FirstOrDefaultAsync(d => d.Id == request.DocumentId && d.BusinessId == _currentUser.BusinessId.Value, ct);
 
             if (document == null)
                 return new DocumentResponse
@@ -614,11 +672,26 @@ public sealed class DocumentService : IDocumentService
                     Message = "Document not found. The document may have been deleted or the ID is incorrect."
                 };
 
-            if (document.CreatedByUserId != _currentUser.UserId)
+            // Allow any business member to sign (not just the creator)
+            // This enables business owners and authorized staff to sign documents
+            if (!_currentUser.UserId.HasValue)
                 return new DocumentResponse
                 {
                     Success = false,
-                    Message = "You don't have permission to sign this document."
+                    Message = "You must be logged in to sign documents."
+                };
+
+            // Verify user is a member of the document's business
+            var isBusinessMember = await _db.Memberships
+                .AnyAsync(m => m.UserId == _currentUser.UserId.Value 
+                    && m.BusinessId == document.BusinessId 
+                    && m.Status == ApiWorker.Authentication.Enum.MembershipStatus.Active, ct);
+
+            if (!isBusinessMember)
+                return new DocumentResponse
+                {
+                    Success = false,
+                    Message = "You don't have permission to sign this document. You must be a member of the business that owns this document."
                 };
 
             var business = await _db.Businesses.FirstOrDefaultAsync(b => b.Id == document.BusinessId, ct);
@@ -658,7 +731,7 @@ public sealed class DocumentService : IDocumentService
 
             document.SignatureBlobUrl = signatureUrl;
             document.SignedBy = request.SignerName;
-            document.SignedAt = request.SignedAt ?? DateTimeOffset.UtcNow;
+            document.SignedAt = DateTimeOffset.UtcNow;
             document.SignatureNotes = request.Notes;
             document.Status = DocumentStatus.Signed;
             document.UpdatedAt = DateTimeOffset.UtcNow;
@@ -686,11 +759,14 @@ public sealed class DocumentService : IDocumentService
         }
         catch (InvalidOperationException ex)
         {
-            _logger.LogError(ex, "Failed to render signed document {DocumentId}", request.DocumentId);
+            _logger.LogError(ex, "Failed to render signed document {DocumentId}. Inner exception: {InnerException}", 
+                request.DocumentId, ex.InnerException?.Message ?? ex.Message);
             return new DocumentResponse
             {
                 Success = false,
-                Message = $"Signature saved but failed to regenerate files. {ex.Message}"
+                Message = $"Signature saved but failed to regenerate files. {ex.Message}",
+                DocumentId = request.DocumentId,
+                DocumentNumber = document?.Number
             };
         }
         catch (Exception ex)
@@ -753,6 +829,12 @@ public sealed class DocumentService : IDocumentService
     {
         try
         {
+            // Validate document has required data for rendering
+            if (document.Lines == null || !document.Lines.Any())
+            {
+                throw new InvalidOperationException("Document must have at least one line item to render.");
+            }
+
             var theme = DocumentTheme.FromJson(document.AppliedThemeJson);
             var signature = await BuildSignatureRenderAsync(document, ct);
 
@@ -840,6 +922,21 @@ public sealed class DocumentService : IDocumentService
         return type == DocumentType.Invoice || 
                type == DocumentType.Receipt || 
                type == DocumentType.Quotation;
+    }
+
+    private async Task<(bool HasAccess, string? ErrorMessage)> ValidateBusinessAccessAsync(Guid businessId, CancellationToken ct)
+    {
+        if (!_currentUser.UserId.HasValue)
+            return (false, "You must be logged in to perform this action.");
+
+        var hasAccess = await _db.Memberships
+            .AnyAsync(m => m.UserId == _currentUser.UserId.Value 
+                && m.BusinessId == businessId 
+                && m.Status == ApiWorker.Authentication.Enum.MembershipStatus.Active, ct);
+
+        return hasAccess 
+            ? (true, null) 
+            : (false, "You don't have permission to access this business.");
     }
 
     private async Task<(bool Success, string? ErrorMessage)> ApplyThemeAsync(TransactionalDocument document, Guid businessId, Guid? templateId, DocumentThemeDto? inlineTheme, CancellationToken ct)

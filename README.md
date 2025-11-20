@@ -466,173 +466,35 @@ final response = await http.get(
 // Handle 401 errors by refreshing token or re-authenticating
 ```
 
-#### 4. Fetch Available Templates
-```dart
-// Fetch all templates for a specific document type
-final token = await secureStorage.read(key: 'accessToken');
-final response = await http.get(
-  Uri.parse('$baseUrl/templates?type=Invoice'),
-  headers: {'Authorization': 'Bearer $token'},
-);
-
-final data = jsonDecode(response.body);
-if (data['success']) {
-  final templates = data['templates'] as List;
-  // Display templates in UI with preview images
-  for (var template in templates) {
-    print('Template: ${template['name']}');
-    print('Preview: ${template['previewUrl']}');
-    print('Theme: ${template['theme']}');
-  }
-}
-```
-
-#### 5. Create Document with Template Selection
-```dart
-// User selects a template from the list
-final selectedTemplateId = '1b351696-f113-4c58-a23a-3afbd27114de';
-
-// Create document using the selected template
-final token = await secureStorage.read(key: 'accessToken');
-final response = await http.post(
-  Uri.parse('$baseUrl/documents'),
-  headers: {
-    'Authorization': 'Bearer $token',
-    'Content-Type': 'application/json',
-  },
-  body: jsonEncode({
-    'businessId': businessId,
-    'type': 'Invoice',
-    'templateId': selectedTemplateId, // Use selected template
-    'customer': {
-      'name': 'John Doe',
-      'phone': '+254712345678',
-    },
-    'lines': [
-      {
-        'name': 'Product A',
-        'quantity': 2,
-        'unitPrice': 100.00,
-      },
-    ],
-    'currency': 'KES',
-  }),
-);
-
-final data = jsonDecode(response.body);
-if (data['success']) {
-  final docxUrl = data['urls']['docxUrl'];
-  final pdfUrl = data['urls']['pdfUrl'];
-  final previewUrl = data['urls']['previewUrl'];
-  // Display preview image in app
-}
-```
-
-#### 6. Create Document Without Template (From Scratch)
-```dart
-// Create document without template (uses default generation)
-final token = await secureStorage.read(key: 'accessToken');
-final response = await http.post(
-  Uri.parse('$baseUrl/documents'),
-  headers: {
-    'Authorization': 'Bearer $token',
-    'Content-Type': 'application/json',
-  },
-  body: jsonEncode({
-    'businessId': businessId,
-    'type': 'Invoice',
-    // No templateId - creates from scratch
-    'theme': {
-      // Optional: override default theme
-      'primaryColor': '#0F172A',
-      'secondaryColor': '#475569',
-      'accentColor': '#F97316',
-      'fontFamily': 'Poppins',
-    },
-    'customer': {
-      'name': 'John Doe',
-      'phone': '+254712345678',
-    },
-    'lines': [
-      {
-        'name': 'Product A',
-        'quantity': 2,
-        'unitPrice': 100.00,
-      },
-    ],
-    'currency': 'KES',
-  }),
-);
-```
-
-#### 7. Template-first + Signature Flow (Complete Mobile UX)
-1. **Template Selection Screen**
-   - Fetch templates: `GET /api/templates?type={Invoice|Receipt|Quotation}`
-   - Display template cards with preview images
-   - Show template name, theme colors, and "Use Template" button
-   - Option: "Create from Scratch" button
-
-2. **Create Document Screen**
-   - If template selected: Include `templateId` in request
-   - If from scratch: Optionally provide custom `theme` object
-   - User fills in customer and line items
-   - Submit: `POST /api/documents`
-
+#### 4. Template-first + Signature Flow (mobile UX)
+1. **Create Document Screen**
+   - User taps “Create Document”.
+   - Present tabs for `Invoice | Receipt | Quotation`.
+   - Optional theme picker (color chips + font dropdown) → map to `theme` object.
+2. **Template Selection (optional)**
+   - If you maintain template IDs locally (or via future template endpoints), set `templateId` in the payload so the API applies business-approved colors/layout.
 3. **Preview & Confirmation**
-   - Display `urls.previewUrl` (PNG) in app
-   - Preview matches final PDF layout including template styling
-
+   - After hitting `POST /api/documents`, render the returned `urls.previewUrl` directly in the app (PNG now mirrors the final PDF, including colors + signature placeholders).
 4. **Signature Capture**
-   - Show "Sign Document" button
-   - Open signature canvas (e.g., `SignatureController` or `scribble` package)
-   - Convert drawing to PNG → `base64Encode`
-   - Call `POST /api/documents/{id}/sign`
-
+   - Show a “Sign Document” CTA that opens a canvas (e.g., `SignatureController` or `scribble` package).
+   - Convert the drawing to PNG → `base64Encode`.
+   - Call `POST /api/documents/{id}/sign` with `signatureBase64` and `signerName`.
 5. **Download / Share**
-   - Use `urls.pdfUrl` for sharing
-   - Server regenerates preview after signing
+   - Use `urls.pdfUrl` for sharing.
+   - Because the server re-generates the preview, you can refresh the preview in-app without re-creating the document.
 
 ```dart
-// Complete flow: Template selection → Document creation → Signature
-// Step 1: Fetch templates
-final templatesResponse = await http.get(
-  Uri.parse('$baseUrl/templates?type=Invoice'),
-  headers: {'Authorization': 'Bearer $token'},
-);
-final templates = jsonDecode(templatesResponse.body)['templates'];
-
-// Step 2: User selects template (or chooses "from scratch")
-String? selectedTemplateId = userSelectedTemplate?.id;
-
-// Step 3: Create document
-final docPayload = {
-  'businessId': businessId,
-  'type': 'Invoice',
-  if (selectedTemplateId != null) 'templateId': selectedTemplateId,
-  'customer': {'name': customerName, 'phone': customerPhone},
-  'lines': lineItems,
-  'currency': 'KES',
-};
-final docResponse = await http.post(
-  Uri.parse('$baseUrl/documents'),
-  headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
-  body: jsonEncode(docPayload),
-);
-final docData = jsonDecode(docResponse.body);
-final documentId = docData['documentId'];
-
-// Step 4: Capture signature
-final signature = await signatureController.toPngBytes();
-final signPayload = {
-  'documentId': documentId,
+final signature = await controller.toPngBytes();
+final payload = {
+  'documentId': docId,
   'signerName': currentUser.name,
   'signatureBase64': base64Encode(signature!),
-  'notes': 'Signed on delivery',
+  'notes': 'Signed on delivery'
 };
 await http.post(
-  Uri.parse('$baseUrl/documents/$documentId/sign'),
+  Uri.parse('$baseUrl/documents/$docId/sign'),
   headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
-  body: jsonEncode(signPayload),
+  body: jsonEncode(payload),
 );
 ```
 
@@ -1036,8 +898,7 @@ Content-Type: application/json
   "documentId": "302a871c-0c8f-4d65-17ed-08de236d7832",
   "signerName": "Jane Wanjiku",
   "signatureBase64": "iVBORw0KGgoAAAANSUhEUgAAAUAAAABACAYAAAD+08YQAAAAA...",
-  "notes": "Signed on delivery",
-  "signedAt": "2025-01-16T08:15:00Z"
+  "notes": "Signed on delivery"
 }
 ```
 
@@ -1065,6 +926,7 @@ Content-Type: application/json
 
 **Tips**
 - Capture the signature on the Flutter canvas (`ui.Image → PNG → base64`) and send as `signatureBase64`.
+- `signedAt` is automatically set by the server (UTC) when the document is signed.
 - The API regenerates DOCX, PDF, and preview so signatures show up everywhere (mobile preview now matches the PDF layout).
 - Signed documents move to the `Signed` status; edit endpoints will block changes until you void or clone the document.
 

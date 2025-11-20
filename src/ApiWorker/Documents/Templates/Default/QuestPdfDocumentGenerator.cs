@@ -15,8 +15,21 @@ public static class QuestPdfDocumentGenerator
 {
     public static byte[] GenerateDocumentPdf(TransactionalDocument document, Business business, DocumentTheme theme, DocumentSignatureRender signature)
     {
-        QuestPDF.Settings.License = LicenseType.Community;
-        return CreateDocumentDefinition(document, business, theme, signature).GeneratePdf();
+        try
+        {
+            QuestPDF.Settings.License = LicenseType.Community;
+            QuestPDF.Settings.EnableDebugging = false; // Set to true for detailed debugging if needed
+            return CreateDocumentDefinition(document, business, theme, signature).GeneratePdf();
+        }
+        catch (QuestPDF.Drawing.Exceptions.DocumentLayoutException ex)
+        {
+            throw new InvalidOperationException(
+                $"PDF layout error for document {document.Number}. " +
+                $"This may be caused by content that doesn't fit on the page. " +
+                $"Line items: {document.Lines?.Count ?? 0}, " +
+                $"Signature present: {signature?.ImageBytes != null && signature.ImageBytes.Length > 0}. " +
+                $"Original error: {ex.Message}", ex);
+        }
     }
 
     public static byte[] GenerateDocumentPreview(TransactionalDocument document, Business business, DocumentTheme theme, DocumentSignatureRender signature)
@@ -171,30 +184,41 @@ public static class QuestPdfDocumentGenerator
                 column.Item().Text(document.Notes).FontSize(9).FontColor(secondary);
             }
 
-            column.Item().PaddingTop(20).Column(sig =>
+            // Signature section - only show if signature exists or document is signed
+            if (signature != null && (signature.ImageBytes != null || !string.IsNullOrWhiteSpace(signature.SignedBy)))
             {
-                sig.Spacing(5);
-                sig.Item().Text("Authorized Signature").Bold().FontColor(primary);
-                if (signature.ImageBytes != null)
-                    sig.Item().Height(60).Image(signature.ImageBytes).FitWidth();
-                else
-                    sig.Item().Height(20).BorderBottom(1).BorderColor(Colors.Grey.Lighten3);
-
-                if (!string.IsNullOrWhiteSpace(signature.SignedBy) || signature.SignedAt.HasValue)
+                column.Item().PaddingTop(20).Column(sig =>
                 {
-                    var signedLine = $"Signed by {signature.SignedBy ?? "N/A"}";
-                    if (signature.SignedAt.HasValue)
-                        signedLine += $" on {signature.SignedAt:dd MMM yyyy HH:mm}";
-                    sig.Item().Text(signedLine).FontSize(9).FontColor(secondary);
-                }
-                else
-                {
-                    sig.Item().Text("Signature pending").FontSize(9).FontColor(secondary);
-                }
+                    sig.Spacing(5);
+                    sig.Item().Text("Authorized Signature").Bold().FontColor(primary);
+                    
+                    if (signature.ImageBytes != null && signature.ImageBytes.Length > 0)
+                    {
+                        // Constrain signature image to prevent layout issues
+                        // Use a fixed width and height to avoid conflicting constraints
+                        sig.Item()
+                            .Width(120) // Fixed width to prevent overflow
+                            .Height(50) // Fixed height - reduced to prevent layout issues
+                            .Image(signature.ImageBytes)
+                            .FitArea(); // Fit within the constrained area
+                    }
+                    else
+                    {
+                        sig.Item().Height(20).BorderBottom(1).BorderColor(Colors.Grey.Lighten3);
+                    }
 
-                if (!string.IsNullOrWhiteSpace(signature.Notes))
-                    sig.Item().Text(signature.Notes).FontSize(9).FontColor(secondary);
-            });
+                    if (!string.IsNullOrWhiteSpace(signature.SignedBy) || signature.SignedAt.HasValue)
+                    {
+                        var signedLine = $"Signed by {signature.SignedBy ?? "N/A"}";
+                        if (signature.SignedAt.HasValue)
+                            signedLine += $" on {signature.SignedAt:dd MMM yyyy HH:mm}";
+                        sig.Item().Text(signedLine).FontSize(9).FontColor(secondary);
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(signature.Notes))
+                        sig.Item().Text(signature.Notes).FontSize(9).FontColor(secondary);
+                });
+            }
         });
 
         static IContainer HeaderCell(IContainer container, Color secondary, Color accent) =>
