@@ -21,15 +21,15 @@ public sealed class VoiceIntentService : IVoiceIntentService
         _logger = logger;
     }
 
-    public async Task<ExtractedInvoiceData?> ExtractInvoiceDataAsync(string transcript, string locale, CancellationToken ct = default)
+    public async Task<ExtractedDocumentData?> ExtractDocumentDataAsync(string transcript, string locale, CancellationToken ct = default)
     {
         try
         {
             var systemPrompt = locale.StartsWith("sw")
-                ? "Wewe ni msaidizi wa biashara. Toa taarifa za ankara kutoka kwa maneno ya mtumiaji. Rudisha JSON tu."
-                : "You are a business assistant. Extract invoice details from user speech. Return only JSON.";
+                ? "Wewe ni msaidizi wa biashara. Toa taarifa za hati kutoka kwa maneno ya mtumiaji. Rudisha JSON tu."
+                : "You are a business assistant. Extract document details from user speech. Return only JSON.";
 
-            var userPrompt = $@"Extract invoice data from: ""{transcript}""
+            var userPrompt = $@"Extract document data from: ""{transcript}""
 
 Return JSON with this structure:
 {{
@@ -66,7 +66,7 @@ Rules:
 
             var content = response.Value.Content[0].Text;
 
-            var extracted = JsonSerializer.Deserialize<ExtractedInvoiceData>(content, new JsonSerializerOptions
+            var extracted = JsonSerializer.Deserialize<ExtractedDocumentData>(content, new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
             });
@@ -75,7 +75,7 @@ Rules:
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to extract invoice data from transcript");
+            _logger.LogError(ex, "Failed to extract document data from transcript");
             return null;
         }
     }

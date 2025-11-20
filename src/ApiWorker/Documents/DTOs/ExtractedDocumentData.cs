@@ -1,6 +1,10 @@
 namespace ApiWorker.Documents.DTOs;
 
-public sealed class ExtractedInvoiceData
+/// <summary>
+/// Data extracted from voice input for document creation.
+/// Used for Invoice, Receipt, and Quotation.
+/// </summary>
+public sealed class ExtractedDocumentData
 {
     public string? CustomerName { get; set; }
     public string? CustomerPhone { get; set; }

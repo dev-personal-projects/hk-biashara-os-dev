@@ -4,6 +4,7 @@ using ApiWorker.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ApiWorker.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251118034222_RemoveShareLogsAndAddReceiptQuotation")]
+    partial class RemoveShareLogsAndAddReceiptQuotation
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -244,9 +247,6 @@ namespace ApiWorker.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<string>("AppliedThemeJson")
-                        .HasColumnType("nvarchar(max)");
-
                     b.Property<Guid>("BusinessId")
                         .HasColumnType("uniqueidentifier");
 
@@ -285,29 +285,13 @@ namespace ApiWorker.Migrations
                         .HasColumnType("nvarchar(512)");
 
                     b.Property<string>("PreviewBlobUrl")
-                        .HasMaxLength(512)
-                        .HasColumnType("nvarchar(512)");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
                         .IsRequired()
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
-
-                    b.Property<string>("SignatureBlobUrl")
-                        .HasMaxLength(512)
-                        .HasColumnType("nvarchar(512)");
-
-                    b.Property<string>("SignatureNotes")
-                        .HasMaxLength(512)
-                        .HasColumnType("nvarchar(512)");
-
-                    b.Property<DateTimeOffset?>("SignedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("SignedBy")
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
 
                     b.Property<int>("Status")
                         .HasColumnType("int");
@@ -317,9 +301,6 @@ namespace ApiWorker.Migrations
 
                     b.Property<decimal>("Tax")
                         .HasColumnType("decimal(18,2)");
-
-                    b.Property<Guid?>("TemplateId")
-                        .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("Total")
                         .HasColumnType("decimal(18,2)");
@@ -338,8 +319,6 @@ namespace ApiWorker.Migrations
                     b.HasIndex("BusinessId");
 
                     b.HasIndex("CreatedByUserId");
-
-                    b.HasIndex("TemplateId");
 
                     b.HasIndex("BusinessId", "Type", "Number")
                         .IsUnique();
@@ -381,13 +360,6 @@ namespace ApiWorker.Migrations
                         .IsRequired()
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("PreviewBlobUrl")
-                        .HasMaxLength(512)
-                        .HasColumnType("nvarchar(512)");
-
-                    b.Property<string>("ThemeJson")
-                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("Type")
                         .HasColumnType("int");
@@ -590,11 +562,6 @@ namespace ApiWorker.Migrations
                         .HasForeignKey("CreatedByUserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-
-                    b.HasOne("ApiWorker.Documents.Entities.Template", null)
-                        .WithMany()
-                        .HasForeignKey("TemplateId")
-                        .OnDelete(DeleteBehavior.SetNull);
                 });
 
             modelBuilder.Entity("ApiWorker.Documents.Entities.Template", b =>

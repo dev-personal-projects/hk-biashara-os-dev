@@ -17,6 +17,8 @@ public sealed class Template
     public string BlobPath { get; set; } = string.Empty; // container/key for DOCX
     public string? FieldsJson { get; set; }              // serialized TemplateField[]
     public bool IsDefault { get; set; } = false;
+    public string? ThemeJson { get; set; }
+    public string? PreviewBlobUrl { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;

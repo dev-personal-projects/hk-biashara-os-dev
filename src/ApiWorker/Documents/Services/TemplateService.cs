@@ -1,257 +1,160 @@
-using DocumentFormat.OpenXml;
-using DocumentFormat.OpenXml.Packaging;
 using ApiWorker.Documents.Entities;
-using ApiWorker.Authentication.Entities;
-using A = DocumentFormat.OpenXml.Drawing;
-using DW = DocumentFormat.OpenXml.Drawing.Wordprocessing;
-using PIC = DocumentFormat.OpenXml.Drawing.Pictures;
-using W = DocumentFormat.OpenXml.Wordprocessing;
-using WordDocument = DocumentFormat.OpenXml.Wordprocessing.Document;
-using Table = DocumentFormat.OpenXml.Drawing.Table;
-using TableProperties = DocumentFormat.OpenXml.Drawing.TableProperties;
+using ApiWorker.Documents.Interfaces;
+using ApiWorker.Documents.Settings;
+using ApiWorker.Data;
+using ApiWorker.Storage;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using DocumentTemplate = ApiWorker.Documents.Entities.Template;
 
 namespace ApiWorker.Documents.Services;
 
 /// <summary>
-/// Generates invoice DOCX files programmatically using OpenXML.
-/// No template needed - creates document from scratch.
+/// Service for managing document templates (global templates only for now).
+/// Handles listing, retrieving, and uploading templates.
 /// </summary>
-public sealed class OpenXmlInvoiceGenerator
+public sealed class TemplateService : ITemplateService
 {
-    /// <summary>
-    /// Creates an invoice DOCX and returns the file stream.
-    /// </summary>
-    public static MemoryStream GenerateInvoice(Invoice invoice, Business business)
+    private readonly ApplicationDbContext _db;
+    private readonly IBlobStorageService _blobStorage;
+    private readonly TemplateStorageSettings _settings;
+    private readonly ILogger<TemplateService> _logger;
+
+    public TemplateService(
+        ApplicationDbContext db,
+        IBlobStorageService blobStorage,
+        IOptions<TemplateStorageSettings> settings,
+        ILogger<TemplateService> logger)
     {
-        var stream = new MemoryStream();
-
-        using (var doc = WordprocessingDocument.Create(stream, WordprocessingDocumentType.Document, true))
-        {
-            var mainPart = doc.AddMainDocumentPart();
-            mainPart.Document = new WordDocument(new W.Body());
-            var body = mainPart.Document.Body!;
-
-            // Header: Business info and invoice details
-            AddBusinessHeader(body, business, invoice, mainPart);
-            AddSpacer(body);
-
-            // Customer info
-            AddCustomerSection(body, invoice);
-            AddSpacer(body);
-
-            // Line items table
-            AddLineItemsTable(body, invoice);
-            AddSpacer(body);
-
-            // Totals
-            AddTotalsSection(body, invoice);
-            AddSpacer(body);
-
-            // Footer: Notes and reference
-            AddFooter(body, invoice);
-        }
-
-        stream.Position = 0;
-        return stream;
+        _db = db;
+        _blobStorage = blobStorage;
+        _settings = settings.Value;
+        _logger = logger;
     }
 
-    private static void AddBusinessHeader(W.Body body, Business business, Invoice invoice, MainDocumentPart mainPart)
+    public async Task<DocumentTemplate?> GetDefaultTemplateAsync(Guid businessId, DocumentType type, CancellationToken ct = default)
     {
-        // Add logo if available
-        if (!string.IsNullOrEmpty(business.LogoUrl))
+        try
         {
-            try
-            {
-                AddLogo(body, business.LogoUrl, mainPart);
-                AddSpacer(body);
-            }
-            catch { /* Skip logo if download fails */ }
+            // For global templates, businessId is ignored - we only return global templates
+            var template = await _db.DocumentTemplates
+                .FirstOrDefaultAsync(
+                    t => t.BusinessId == null && t.Type == type && t.IsDefault,
+                    ct);
+
+            return template;
         }
-
-        // Business name (large, bold)
-        body.AppendChild(CreateParagraph(business.Name, bold: true, fontSize: "32"));
-
-        // Business contact info
-        if (!string.IsNullOrEmpty(business.Phone))
-            body.AppendChild(CreateParagraph($"Phone: {business.Phone}"));
-        if (!string.IsNullOrEmpty(business.Email))
-            body.AppendChild(CreateParagraph($"Email: {business.Email}"));
-
-        AddSpacer(body);
-
-        // Invoice title and number (right-aligned)
-        body.AppendChild(CreateParagraph("INVOICE", bold: true, fontSize: "28", alignment: W.JustificationValues.Right));
-        body.AppendChild(CreateParagraph($"#{invoice.Number}", fontSize: "20", alignment: W.JustificationValues.Right));
-        body.AppendChild(CreateParagraph($"Date: {invoice.IssuedAt:dd/MM/yyyy}", alignment: W.JustificationValues.Right));
-
-        if (invoice.DueAt.HasValue)
-            body.AppendChild(CreateParagraph($"Due: {invoice.DueAt:dd/MM/yyyy}", alignment: W.JustificationValues.Right));
-    }
-
-    private static void AddCustomerSection(W.Body body, Invoice invoice)
-    {
-        body.AppendChild(CreateParagraph("BILL TO:", bold: true));
-        body.AppendChild(CreateParagraph(invoice.CustomerName ?? ""));
-
-        if (!string.IsNullOrEmpty(invoice.CustomerPhone))
-            body.AppendChild(CreateParagraph(invoice.CustomerPhone));
-        if (!string.IsNullOrEmpty(invoice.CustomerEmail))
-            body.AppendChild(CreateParagraph(invoice.CustomerEmail));
-        if (!string.IsNullOrEmpty(invoice.BillingAddressLine1))
-            body.AppendChild(CreateParagraph(invoice.BillingAddressLine1));
-        if (!string.IsNullOrEmpty(invoice.BillingAddressLine2))
-            body.AppendChild(CreateParagraph(invoice.BillingAddressLine2));
-        if (!string.IsNullOrEmpty(invoice.BillingCity) || !string.IsNullOrEmpty(invoice.BillingCountry))
-            body.AppendChild(CreateParagraph($"{invoice.BillingCity}{(string.IsNullOrEmpty(invoice.BillingCity) || string.IsNullOrEmpty(invoice.BillingCountry) ? "" : ", ")}{invoice.BillingCountry}"));
-        
-        if (!string.IsNullOrEmpty(invoice.Reference))
+        catch (Exception ex)
         {
-            AddSpacer(body);
-            body.AppendChild(CreateParagraph($"Reference: {invoice.Reference}", fontSize: "20"));
+            _logger.LogError(ex, "Failed to get default template for type {Type}", type);
+            return null;
         }
     }
 
-    private static void AddLineItemsTable(W.Body body, Invoice invoice)
+    public async Task<List<DocumentTemplate>> ListTemplatesAsync(Guid businessId, DocumentType? type = null, CancellationToken ct = default)
     {
-        var table = new W.Table();
-
-        // Table borders
-        var tblProp = new W.TableProperties(
-            new W.TableBorders(
-                new W.TopBorder { Val = W.BorderValues.Single, Size = 4 },
-                new W.BottomBorder { Val = W.BorderValues.Single, Size = 4 },
-                new W.LeftBorder { Val = W.BorderValues.Single, Size = 4 },
-                new W.RightBorder { Val = W.BorderValues.Single, Size = 4 },
-                new W.InsideHorizontalBorder { Val = W.BorderValues.Single, Size = 4 },
-                new W.InsideVerticalBorder { Val = W.BorderValues.Single, Size = 4 }
-            )
-        );
-        table.AppendChild(tblProp);
-
-        // Header row
-        var headerRow = new W.TableRow();
-        headerRow.Append(
-            CreateTableCell("Item", bold: true),
-            CreateTableCell("Qty", bold: true),
-            CreateTableCell("Price", bold: true),
-            CreateTableCell("Tax", bold: true),
-            CreateTableCell("Total", bold: true)
-        );
-        table.AppendChild(headerRow);
-
-        // Data rows
-        foreach (var line in invoice.Lines)
+        try
         {
-            var row = new W.TableRow();
-            row.Append(
-                CreateTableCell(line.Name),
-                CreateTableCell(line.Quantity.ToString("N2")),
-                CreateTableCell($"{invoice.Currency} {line.UnitPrice:N2}"),
-                CreateTableCell($"{line.TaxRate * 100:N0}%"),
-                CreateTableCell($"{invoice.Currency} {line.LineTotal:N2}")
-            );
-            table.AppendChild(row);
+            // Only return global templates (BusinessId = null)
+            var query = _db.DocumentTemplates
+                .Where(t => t.BusinessId == null);
+
+            if (type.HasValue)
+                query = query.Where(t => t.Type == type.Value);
+
+            var templates = await query
+                .OrderBy(t => t.Type)
+                .ThenBy(t => t.Name)
+                .ToListAsync(ct);
+
+            return templates;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to list templates");
+            return new List<Template>();
+        }
+    }
+
+    public async Task<DocumentTemplate?> GetTemplateAsync(Guid templateId, CancellationToken ct = default)
+    {
+        try
+        {
+            var template = await _db.DocumentTemplates
+                .FirstOrDefaultAsync(t => t.Id == templateId && t.BusinessId == null, ct);
+
+            return template;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get template {TemplateId}", templateId);
+            return null;
+        }
+    }
+
+    public async Task<DocumentTemplate> UploadTemplateAsync(Guid businessId, DocumentType type, string name, Stream templateFile, CancellationToken ct = default)
+    {
+        // For global templates, businessId should be null
+        var isGlobal = businessId == Guid.Empty;
+
+        var fileName = $"{name.ToLowerInvariant().Replace(" ", "-")}-v1.docx";
+        var blobPath = isGlobal 
+            ? $"global/{type}/{fileName}"
+            : $"{businessId}/{type}/{fileName}";
+
+        // Upload to blob storage
+        var blobUrl = await _blobStorage.UploadAsync(
+            templateFile,
+            blobPath,
+            _settings.TemplatesContainer,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ct);
+
+        var template = new DocumentTemplate
+        {
+            Id = Guid.NewGuid(),
+            BusinessId = isGlobal ? null : businessId,
+            Type = type,
+            Name = name,
+            Version = 1,
+            BlobPath = blobPath,
+            IsDefault = false,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+
+        _db.DocumentTemplates.Add(template);
+        await _db.SaveChangesAsync(ct);
+
+        _logger.LogInformation("Template uploaded: {Name} ({Type})", name, type);
+
+        return template;
+    }
+
+    public async Task SetDefaultTemplateAsync(Guid templateId, CancellationToken ct = default)
+    {
+        var template = await _db.DocumentTemplates
+            .FirstOrDefaultAsync(t => t.Id == templateId, ct);
+
+        if (template == null)
+            throw new InvalidOperationException($"Template {templateId} not found");
+
+        // Unset all other defaults for this type (global templates only)
+        var otherDefaults = await _db.DocumentTemplates
+            .Where(t => t.BusinessId == null && t.Type == template.Type && t.IsDefault && t.Id != templateId)
+            .ToListAsync(ct);
+
+        foreach (var other in otherDefaults)
+        {
+            other.IsDefault = false;
+            other.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
-        body.AppendChild(table);
-    }
+        template.IsDefault = true;
+        template.UpdatedAt = DateTimeOffset.UtcNow;
 
-    private static void AddTotalsSection(W.Body body, Invoice invoice)
-    {
-        body.AppendChild(CreateParagraph($"Subtotal: {invoice.Currency} {invoice.Subtotal:N2}", alignment: W.JustificationValues.Right));
-        body.AppendChild(CreateParagraph($"Tax: {invoice.Currency} {invoice.Tax:N2}", alignment: W.JustificationValues.Right));
-        body.AppendChild(CreateParagraph($"TOTAL: {invoice.Currency} {invoice.Total:N2}", bold: true, fontSize: "24", alignment: W.JustificationValues.Right));
-    }
+        await _db.SaveChangesAsync(ct);
 
-    private static void AddFooter(W.Body body, Invoice invoice)
-    {
-        if (!string.IsNullOrEmpty(invoice.Notes))
-        {
-            body.AppendChild(CreateParagraph("Notes:", bold: true));
-            body.AppendChild(CreateParagraph(invoice.Notes));
-        }
-
-        if (!string.IsNullOrEmpty(invoice.Reference))
-            body.AppendChild(CreateParagraph($"Reference: {invoice.Reference}"));
-    }
-
-    // Helper methods
-    private static W.Paragraph CreateParagraph(string text, bool bold = false, string fontSize = "22", W.JustificationValues? alignment = null)
-    {
-        var para = new W.Paragraph();
-
-        if (alignment.HasValue)
-            para.AppendChild(new W.ParagraphProperties(new W.Justification { Val = alignment.Value }));
-
-        var run = new W.Run();
-        var runProps = new W.RunProperties();
-
-        if (bold)
-            runProps.AppendChild(new W.Bold());
-
-        runProps.AppendChild(new W.FontSize { Val = fontSize });
-        run.AppendChild(runProps);
-        run.AppendChild(new W.Text(text));
-
-        para.AppendChild(run);
-        return para;
-    }
-
-    private static W.TableCell CreateTableCell(string text, bool bold = false)
-    {
-        var cell = new W.TableCell();
-        var para = new W.Paragraph();
-        var run = new W.Run();
-
-        if (bold)
-            run.AppendChild(new W.RunProperties(new W.Bold()));
-
-        run.AppendChild(new W.Text(text));
-        para.AppendChild(run);
-        cell.AppendChild(para);
-
-        return cell;
-    }
-
-    private static void AddSpacer(W.Body body)
-    {
-        body.AppendChild(new W.Paragraph());
-    }
-
-    private static void AddLogo(W.Body body, string logoUrl, MainDocumentPart mainPart)
-    {
-        using var httpClient = new HttpClient();
-        var imageBytes = httpClient.GetByteArrayAsync(logoUrl).Result;
-        using var imageStream = new MemoryStream(imageBytes);
-
-        var imagePart = mainPart.AddImagePart(ImagePartType.Png);
-        imagePart.FeedData(imageStream);
-
-        var para = new W.Paragraph();
-        var run = new W.Run();
-
-        var drawing = new W.Drawing(
-            new DW.Inline(
-                new DW.Extent { Cx = 914400L, Cy = 914400L }, // 1 inch = 914400 EMUs
-                new DW.DocProperties { Id = 1, Name = "Logo" },
-                new A.Graphic(
-                    new A.GraphicData(
-                        new PIC.Picture(
-                            new PIC.NonVisualPictureProperties(
-                                new PIC.NonVisualDrawingProperties { Id = 0, Name = "Logo" },
-                                new PIC.NonVisualPictureDrawingProperties()),
-                            new PIC.BlipFill(
-                                new A.Blip { Embed = mainPart.GetIdOfPart(imagePart) },
-                                new A.Stretch(new A.FillRectangle())),
-                            new PIC.ShapeProperties(
-                                new A.Transform2D(
-                                    new A.Offset { X = 0, Y = 0 },
-                                    new A.Extents { Cx = 914400L, Cy = 914400L }),
-                                new A.PresetGeometry { Preset = A.ShapeTypeValues.Rectangle })))
-                    { Uri = "http://schemas.openxmlformats.org/drawingml/2006/picture" })));
-
-        run.AppendChild(drawing);
-        para.AppendChild(run);
-        body.AppendChild(para);
+        _logger.LogInformation("Template {TemplateId} set as default for type {Type}", templateId, template.Type);
     }
 }

@@ -20,42 +20,52 @@
 
 ## Features
 
-### 📄 Smart Documents
-- Create **Invoices, Receipts, Quotations, Ledgers, Balance Sheets**
-- **Voice to Document** (English/Swahili): speak → transcript → validate → DOCX/PDF
-- **Manual builder** with branded templates (logo, colors, fields)
+### 📄 Smart Documents (✅ Implemented)
+- Create **Invoices, Receipts, and Quotations** with manual or voice input
+- **Voice to Document** (English/Swahili): transcript → AI extraction → validate → DOCX/PDF
+- **Manual document builder** with customer and line items
 - Export **DOCX (OpenXML)** and **PDF (QuestPDF)**
-- Share via **WhatsApp**, PDF link, or **QR code**
-- Audit trail of views/sends; versioned templates
-- OCR scan supplier invoices (coming soon)
+- Document versioning and status tracking (Draft, Final, Voided)
+- **Custom theming & signatures**: mobile users pick colors/fonts, sign on-screen, and get regenerated DOCX/PDF/preview with embedded signature
+- Auto-numbering per document type: `INV-{yyyyMM}-{####}`, `RCPT-{yyyyMM}-{####}`, `QUO-{yyyyMM}-{####}`
+- **Coming Soon**: Ledgers, Balance Sheets, OCR scan
 
-### 🔊 Voice Processing
-- **Azure Speech SDK**: Streaming STT for `en-KE` and `sw-KE`
+### 🔊 Voice Processing (✅ Implemented)
+- **Azure Speech SDK**: Speech-to-Text for `en-KE` and `sw-KE`
+- **Azure OpenAI**: Function-calling to extract structured document fields from transcripts
+- **Cosmos DB**: Transcription storage with business-level partitioning
 - Phrase-list boosting for product/customer names
-- **Azure OpenAI** function-calling to extract structured fields
-- **Offline fallback**: Whisper/Vosk transcription on mobile
+- **Offline fallback**: Mobile app handles offline transcription (Whisper/Vosk)
 
-### 🔄 Auto Reordering
+### 🔐 Authentication & Multi-Business (✅ Implemented)
+- User signup with auto-login (JWT tokens)
+- Email/password and Google OAuth authentication
+- Business registration with logo upload
+- Multi-business support (users can own/switch between businesses)
+- Session initialization and management
+- Onboarding status tracking
+
+### 🔄 Auto Reordering (🚧 Planned)
 - AI-powered stock forecasting
 - Smart reorder suggestions
 - One-tap Purchase Orders
 - Industry-specific presets
 
-### 🗺️ Supplier Discovery
+### 🗺️ Supplier Discovery (🚧 Planned)
 - Find nearby distributors on map
 - Supplier scoring (price + reliability + distance)
 - Contact via call/WhatsApp/email
 
-### 🤖 AI Copilot
+### 🤖 AI Copilot (🚧 Planned)
 - Sales forecasting per product
 - Smart reminders and follow-ups
 - Meeting scheduling assistant
 - Explainable business insights
 
-### 📱 Offline-First
-- Works without internet (mobile transcribes offline)
+### 📱 Offline-First Architecture
+- Mobile app transcribes offline (Whisper/Vosk)
 - Background sync when online
-- Full Swahili and English support
+- Full Swahili (`sw-KE`) and English (`en-KE`) support
 
 ---
 
@@ -63,11 +73,16 @@
 
 | Layer | Technology |
 |-------|-----------|
-| **Backend** | .NET 9, Clean Architecture, Azure SQL Database |
-| **AI** | Azure OpenAI (extraction), Azure Speech to Text (en/sw) |
-| **Documents** | OpenXML (DOCX), QuestPDF (PDF) |
-| **Storage** | Azure Blob Storage, Redis Cache |
-| **Integrations** | WhatsApp Business API, Google Places API |
+| **Backend** | .NET 9, Clean Architecture, ASP.NET Core Web API |
+| **Database** | Azure SQL Database (EF Core), Azure Cosmos DB (transcripts) |
+| **AI** | Azure OpenAI (GPT-4o-mini for extraction), Azure Speech to Text (en-KE/sw-KE) |
+| **Documents** | OpenXML (DOCX generation), QuestPDF (PDF generation) |
+| **Storage** | Azure Blob Storage (documents, templates, logos), Azure Key Vault (secrets) |
+| **Authentication** | JWT Bearer tokens, Supabase (user management), Google OAuth |
+| **Integrations** | (Sharing handled client-side) |
+| **Validation** | FluentValidation, Data Annotations |
+| **Mapping** | AutoMapper |
+| **Deployment** | Docker, Azure Container Apps, Bicep (IaC) |
 | **Mobile** | Flutter (separate repo; offline STT fallback) |
 
 ---
@@ -81,26 +96,70 @@
 
 # Run API
 dotnet run --project src/ApiWorker
+
+# (Optional) Seed default DOCX templates + previews
+./scripts/seed-templates.sh
 ```
 
-**Local API**: `http://localhost:5052/api`
+**Local API**: `http://localhost:5052/api`  
+**OpenAPI/Swagger**: `http://localhost:5052/openapi/v1.json` (Development only)
+
+> **Why seed templates?**  
+> The seeding script loads your Azure Key Vault secret `ConnectionStrings--BlobStorage`, creates the `doc-templates`, `docs`, and `doc-previews` containers (if needed), and uploads six global templates (Invoice, Receipt, Quotation variants). This gives users ready-made layouts they can apply immediately from the mobile app or API.
 
 ---
 
 ## Architecture
 
 ```
-Flutter App → .NET API → Azure SQL
-     ↓           ↓         ↓
-  Voice/OCR → Azure AI → Blob Storage
-     ↓           ↓         ↓
- WhatsApp ← Notifications ← Redis Cache
+┌─────────────┐
+│ Flutter App │
+└──────┬──────┘
+       │ HTTP/REST
+       ↓
+┌─────────────────────────────────────┐
+│      .NET 9 API Worker              │
+│  ┌───────────────────────────────┐  │
+│  │  Authentication Module        │  │
+│  │  - JWT, Supabase, OAuth       │  │
+│  └───────────────────────────────┘  │
+│  ┌───────────────────────────────┐  │
+│  │  Documents Module             │  │
+│  │  - Invoices, Templates        │  │
+│  └───────────────────────────────┘  │
+│  ┌───────────────────────────────┐  │
+│  │  Speech Module                │  │
+│  │  - Azure Speech SDK           │  │
+│  └───────────────────────────────┘  │
+└──────┬──────────────────────────┬───┘
+       │                          │
+       ↓                          ↓
+┌──────────────┐          ┌──────────────┐
+│ Azure SQL DB │          │ Cosmos DB    │
+│ (Documents,  │          │ (Transcripts)│
+│  Users,      │          │              │
+│  Businesses) │          └──────────────┘
+└──────┬───────┘
+       │
+       ↓
+┌─────────────────┐
+│ Azure Blob      │
+│ Storage         │
+│ (DOCX, PDF,     │
+│  Logos)         │
+└─────────────────┘
+       │
+       ↓
+┌─────────────────┐
+│ Azure OpenAI    │
+│ (Extraction)    │
+└─────────────────┘
 ```
 
 ### Core Flows
-1. **Voice Invoice**: Speak → Parse → Validate → PDF → WhatsApp
-2. **Auto Reorder**: Low stock → Forecast → Draft PO → Send to supplier
-3. **Supplier Discovery**: Search nearby → Rank by score → Contact
+1. **Voice Document**: Mobile transcribes → API extracts (Azure OpenAI) → Validates → Generates DOCX/PDF → Stores in Blob → Returns URLs
+2. **Manual Document**: User fills form → API validates → Generates DOCX/PDF → Stores in Blob → Returns URLs
+3. **Authentication**: Signup → Auto-login → Business registration → Session initialization → Multi-business switching
 
 ---
 
@@ -127,7 +186,32 @@ Flutter App → .NET API → Azure SQL
 ```
 Local: http://localhost:5052/api
 Production: https://your-api.azurewebsites.net/api
+Docker: http://localhost:8000/api
 ```
+
+### API Endpoints Summary
+
+#### Authentication (`/api/auth`)
+- `POST /auth/signup` - Create account (auto-login)
+- `POST /auth/login` - Email/password login
+- `POST /auth/google` - Google OAuth login
+- `POST /auth/business/register` - Register business (authenticated)
+- `POST /auth/initialize-session` - Initialize user session (authenticated)
+- `GET /auth/businesses` - List user's businesses (authenticated)
+- `POST /auth/businesses/switch` - Switch active business (authenticated)
+- `GET /auth/health` - Health check
+
+#### Documents (`/api/documents`)
+- `POST /api/documents` - Create document manually (Invoice, Receipt, or Quotation)
+- `POST /api/documents/voice` - Create document from voice transcript
+- `GET /api/documents/{id}` - Get document details
+- `PUT /api/documents/{id}` - Update document (draft only)
+- `GET /api/documents` - List documents with filters (type, status, date range, search)
+- `POST /api/documents/{id}/sign` - Upload mobile signature + regenerate DOCX/PDF/preview
+
+#### Templates (`/api/templates`)
+- `GET /api/templates` - List all available templates (optionally filtered by document type)
+- `GET /api/templates/{id}` - Get template details by ID
 
 ### Authentication Endpoints
 
@@ -206,7 +290,7 @@ Content-Type: application/json
 ```http
 POST /auth/business/register
 Authorization: Bearer {jwt-token}
-Content-Type: application/json
+Content-Type: multipart/form-data
 
 {
   "name": "Mama Mboga Shop",
@@ -215,9 +299,7 @@ Content-Type: application/json
   "town": "Westlands",
   "email": "shop@example.com",
   "phone": "+254712345678",
-  "currency": "KES",
-  "usesVat": true,
-  "defaultTaxRate": 0.16
+  "logo": <file> (optional)
 }
 ```
 
@@ -226,6 +308,82 @@ Content-Type: application/json
 {
   "success": true,
   "message": "Business registered successfully! You can now start using BiasharaOS.",
+  "businessId": "business-uuid-here"
+}
+```
+
+#### 5. Initialize Session (Authenticated)
+```http
+POST /auth/initialize-session
+Authorization: Bearer {jwt-token}
+Content-Type: application/json
+
+{
+  "businessId": "business-uuid-here" (optional)
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "user": {
+    "id": "user-uuid",
+    "fullName": "John Doe",
+    "email": "john@example.com"
+  },
+  "currentBusiness": {
+    "id": "business-uuid",
+    "name": "Mama Mboga Shop"
+  },
+  "businesses": [
+    {
+      "id": "business-uuid",
+      "name": "Mama Mboga Shop",
+      "category": "retail"
+    }
+  ]
+}
+```
+
+#### 6. List User Businesses (Authenticated)
+```http
+GET /auth/businesses
+Authorization: Bearer {jwt-token}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "businesses": [
+    {
+      "id": "business-uuid",
+      "name": "Mama Mboga Shop",
+      "category": "retail",
+      "county": "Nairobi",
+      "isActive": true
+    }
+  ]
+}
+```
+
+#### 7. Switch Business (Authenticated)
+```http
+POST /auth/businesses/switch
+Authorization: Bearer {jwt-token}
+Content-Type: application/json
+
+{
+  "businessId": "business-uuid-here"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Business switched successfully",
   "businessId": "business-uuid-here"
 }
 ```
@@ -308,6 +466,38 @@ final response = await http.get(
 // Handle 401 errors by refreshing token or re-authenticating
 ```
 
+#### 4. Template-first + Signature Flow (mobile UX)
+1. **Create Document Screen**
+   - User taps “Create Document”.
+   - Present tabs for `Invoice | Receipt | Quotation`.
+   - Optional theme picker (color chips + font dropdown) → map to `theme` object.
+2. **Template Selection (optional)**
+   - If you maintain template IDs locally (or via future template endpoints), set `templateId` in the payload so the API applies business-approved colors/layout.
+3. **Preview & Confirmation**
+   - After hitting `POST /api/documents`, render the returned `urls.previewUrl` directly in the app (PNG now mirrors the final PDF, including colors + signature placeholders).
+4. **Signature Capture**
+   - Show a “Sign Document” CTA that opens a canvas (e.g., `SignatureController` or `scribble` package).
+   - Convert the drawing to PNG → `base64Encode`.
+   - Call `POST /api/documents/{id}/sign` with `signatureBase64` and `signerName`.
+5. **Download / Share**
+   - Use `urls.pdfUrl` for sharing.
+   - Because the server re-generates the preview, you can refresh the preview in-app without re-creating the document.
+
+```dart
+final signature = await controller.toPngBytes();
+final payload = {
+  'documentId': docId,
+  'signerName': currentUser.name,
+  'signatureBase64': base64Encode(signature!),
+  'notes': 'Signed on delivery'
+};
+await http.post(
+  Uri.parse('$baseUrl/documents/$docId/sign'),
+  headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+  body: jsonEncode(payload),
+);
+```
+
 ### Supabase OAuth Flow (Optional)
 1. Use Supabase Auth SDK with Google provider
 2. Extract ID token from Supabase session
@@ -318,13 +508,22 @@ final response = await http.get(
 
 ## Configuration
 
-Update `appsettings.json`:
+### Local Development (`appsettings.json`)
 
 ```json
 {
   "ConnectionStrings": {
-    "Default": "Server=your-server.database.windows.net;Database=BiasharaOS;User Id=admin;Password=***;",
-    "BlobStorage": "DefaultEndpointsProtocol=https;AccountName=***;AccountKey=***;"
+    "Default": "Server=tcp:localhost,1433;Initial Catalog=BiasharaOS;Integrated Security=true;",
+    "BlobStorage": "UseDevelopmentStorage=true"
+  },
+  "Cosmos": {
+    "Endpoint": "https://localhost:8081",
+    "Key": "local-development-key",
+    "Database": "biasharaos-db",
+    "Containers": {
+      "Transcripts": "speech-transcripts"
+    },
+    "CreateIfNotExists": true
   },
   "Auth": {
     "Supabase": {
@@ -332,44 +531,59 @@ Update `appsettings.json`:
       "Key": "your-supabase-anon-key"
     },
     "Jwt": {
-      "SecretKey": "your-jwt-secret-key-min-32-chars",
+      "SecretKey": "your-jwt-secret-key-min-32-chars-required",
       "Issuer": "BiasharaOS",
       "Audience": "BiasharaOS-Users",
-      "ExpiryHours": 24
+      "ExpiryHours": 1
     }
   },
   "Documents": {
     "DefaultCurrency": "KES",
+    "DefaultLocale": "en-KE",
+    "AllowedCurrencies": ["KES", "USD", "EUR"],
     "Numbering": {
       "InvoicePrefix": "INV-",
-      "ReceiptPrefix": "RCPT-"
+      "ReceiptPrefix": "RCPT-",
+      "QuotationPrefix": "QUO-",
+      "Pattern": "yyyyMM-####"
     },
-    "BlobContainers": {
-      "Documents": "docs",
-      "Templates": "doc-templates"
+    "Storage": {
+      "TemplatesContainer": "doc-templates",
+      "DocumentsContainer": "docs",
+      "PreviewsContainer": "doc-previews",
+      "PathFormat": "{businessId}/{type}/{yyyy}/{MM}/{fileName}"
     }
+  },
+  "Speech": {
+    "Provider": "AzureSpeech",
+    "Region": "northeurope",
+    "Key": "your-azure-speech-key",
+    "DefaultLocale": "en-KE",
+    "Locales": ["en-KE", "sw-KE"],
+    "UseNumeralNormalization": true
   },
   "Voice": {
     "Provider": "AzureSpeech",
-    "Region": "eastus",
+    "Region": "northeurope",
     "Key": "your-azure-speech-key",
+    "DefaultLocale": "en-KE",
     "Locales": ["en-KE", "sw-KE"],
-    "PhraseList": ["Unga", "M-Pesa", "Karatasi"]
+    "UseNumeralNormalization": true,
+    "PhraseList": ["M-Pesa", "Unga", "Mama Mboga", "Sukuma Wiki"]
   },
   "AzureOpenAI": {
     "Endpoint": "https://your-azure-openai.openai.azure.com/",
     "ApiKey": "your-aoai-key",
     "Deployment": "gpt-4o-mini"
-  },
-  "Share": {
-    "WhatsApp": {
-      "PhoneNumberId": "whatsapp-number-id",
-      "AccessToken": "meta-access-token",
-      "ApiBase": "https://graph.facebook.com/v20.0"
-    }
   }
 }
 ```
+
+### Production Configuration
+
+For production, use **Azure Key Vault** for secrets. The application automatically loads configuration from Key Vault when `AddKeyVaultConfiguration()` is called in `Program.cs`.
+
+Key Vault secrets should match the configuration keys above (e.g., `ConnectionStrings--Default`, `Auth--Jwt--SecretKey`).
 
 ---
 
@@ -378,40 +592,55 @@ Update `appsettings.json`:
 ### Module Structure
 ```
 src/ApiWorker/Documents/
-├── Controllers/          # API endpoints
-├── DTOs/                 # Request/Response models
-├── Entities/             # Database models
-├── Services/             # Business logic
-├── Interfaces/           # Service contracts
-├── Validators/           # FluentValidation rules
-├── Mappings/             # AutoMapper profiles
-├── Settings/             # Configuration models
-├── Extensions/           # DI registration
-└── Templates/            # Default DOCX templates
+├── Controllers/          # API endpoints (DocumentsController)
+├── DTOs/                 # Request/Response models (TransactionalDocumentDtos, DocumentDtos, ExtractedDocumentData)
+├── Core/Entities/        # Database models (Document, TransactionalDocument, Invoice, Receipt, Quotation)
+├── Services/             # Business logic (DocumentService, VoiceIntentService, TemplateService)
+├── Interfaces/           # Service contracts (IDocumentService, IVoiceIntentService, ITemplateService)
+├── Validators/           # FluentValidation rules (DocumentValidators)
+├── Mappings/             # AutoMapper profiles (DocumentMappings)
+├── Settings/             # Configuration models (DocumentSettings, AzureOpenAISettings)
+├── Extensions/           # DI registration (DocumentServiceCollectionExtensions)
+└── Templates/            # Document generators (QuestPdfDocumentGenerator, OpenXmlDocumentGenerator)
 ```
+
+### Supported Document Types
+- ✅ **Invoices** - Fully implemented (manual and voice creation)
+- ✅ **Receipts** - Fully implemented (manual and voice creation)
+- ✅ **Quotations** - Fully implemented (manual and voice creation)
+- 🚧 **Ledgers** - Planned
+- 🚧 **Balance Sheets** - Planned
 
 ### Document Flows
 
-#### 1. Voice Invoice
+#### 1. Voice Document
 ```
-Speech → Transcript → Extract fields (AI) → Validate → Render (DOCX/PDF) → WhatsApp
+Speech → Transcript → Extract fields (AI) → Validate → Render (DOCX/PDF) → Store → Return URLs
 ```
 
 #### 2. Manual Document
 ```
-Choose template → Fill fields → Render (DOCX/PDF) → Share
+Fill form → Validate → Render (DOCX/PDF) → Store → Return URLs
 ```
 
 ### Documents API Endpoints
 
-#### 1. Create Invoice Manually
+#### 1. Create Document Manually
 ```http
-POST /api/invoices
+POST /api/documents
 Authorization: Bearer {jwt-token}
 Content-Type: application/json
 
 {
   "businessId": "45bc8336-f8b7-4bdc-aaf2-1dfbea5dbaa4",
+  "type": "Invoice",
+  "templateId": "a1aa7f6c-6e8c-4cd0-a2a5-08dd12345678",
+  "theme": {
+    "primaryColor": "#0F172A",
+    "secondaryColor": "#475569",
+    "accentColor": "#F97316",
+    "fontFamily": "Poppins"
+  },
   "customer": {
     "name": "Mega Logistics",
     "phone": "+254712345678",
@@ -444,6 +673,9 @@ Content-Type: application/json
   "reference": "PO-2025-001"
 }
 ```
+
+- `templateId` is optional; when provided the API validates that the business owns/has access to the template.
+- `theme` is optional and lets the mobile app override colors/fonts without uploading a new template.
 
 **Minimal Example (Required Fields Only):**
 ```json
@@ -481,38 +713,142 @@ Content-Type: application/json
     "docxUrl": "https://biasharaos.blob.core.windows.net/invoices/INV-202511-0006.docx",
     "pdfUrl": "https://biasharaos.blob.core.windows.net/invoices/INV-202511-0006.pdf",
     "previewUrl": "https://biasharaos.blob.core.windows.net/doc-previews/INV-202511-0006.png"
-  }
+  },
+  "signature": null
 }
 ```
 
-#### 2. Create Invoice from Voice
+**Create Receipt Example:**
+```json
+{
+  "businessId": "45bc8336-f8b7-4bdc-aaf2-1dfbea5dbaa4",
+  "type": "Receipt",
+  "theme": {
+    "primaryColor": "#065F46",
+    "secondaryColor": "#047857",
+    "accentColor": "#10B981",
+    "fontFamily": "Inter"
+  },
+  "customer": {
+    "name": "Jane Wanjiku",
+    "phone": "+254712345678",
+    "email": "jane@example.com"
+  },
+  "lines": [
+    {
+      "name": "Sugar 2kg",
+      "quantity": 5,
+      "unitPrice": 250.00,
+      "taxRate": 0.16
+    },
+    {
+      "name": "Rice 1kg",
+      "quantity": 3,
+      "unitPrice": 180.00,
+      "taxRate": 0.16
+    }
+  ],
+  "currency": "KES",
+  "notes": "Payment received in full"
+}
+```
+
+**Create Quotation Example:**
+```json
+{
+  "businessId": "45bc8336-f8b7-4bdc-aaf2-1dfbea5dbaa4",
+  "type": "Quotation",
+  "templateId": "f3d5d0b8-4cd1-4a9a-9910-08dd12349999",
+  "customer": {
+    "name": "ABC Company Ltd",
+    "phone": "+254712345678",
+    "email": "contact@abccompany.com",
+    "addressLine1": "456 Business Park",
+    "city": "Nairobi",
+    "country": "Kenya"
+  },
+  "lines": [
+    {
+      "name": "Office Supplies Package",
+      "description": "Complete office stationery set",
+      "quantity": 1,
+      "unitPrice": 15000.00,
+      "taxRate": 0.16
+    }
+  ],
+  "currency": "KES",
+  "issuedAt": "2025-01-15T00:00:00Z",
+  "dueAt": "2025-01-30T00:00:00Z",
+  "notes": "Valid for 15 days. Prices subject to change.",
+  "reference": "QUO-2025-001"
+}
+```
+
+#### 2. Create Document from Voice
 ```http
-POST /api/invoices/voice
+POST /api/documents/voice
 Authorization: Bearer {jwt-token}
 Content-Type: application/json
 
 {
   "businessId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "type": "Invoice",
   "transcriptText": "Create invoice for John Kamau. Three bags of maize flour at 180 shillings each and two bottles of cooking oil at 350 shillings each",
   "locale": "en-KE"
 }
 ```
 
-**Swahili Example:**
+- Optional fields:
+  - `templateId`
+  - `theme` (same structure as manual request)
+
+**Create Receipt from Voice (English):**
 ```json
 {
   "businessId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "type": "Receipt",
+  "transcriptText": "Create receipt for Jane Wanjiku. Five bags of sugar at 250 shillings each and three bags of rice at 180 shillings each. Payment received in full",
+  "locale": "en-KE"
+}
+```
+
+**Create Quotation from Voice (English):**
+```json
+{
+  "businessId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "type": "Quotation",
+  "transcriptText": "Create quotation for ABC Company. One office supplies package at 15000 shillings. Valid for 15 days",
+  "locale": "en-KE"
+}
+```
+
+**Swahili Examples:**
+```json
+{
+  "businessId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "type": "Invoice",
   "transcriptText": "Tengeneza ankara kwa John Kamau. Mifuko mitatu ya unga kwa shilingi 180 kila moja na chupa mbili za mafuta kwa shilingi 350 kila moja",
   "locale": "sw-KE"
 }
 ```
 
-**Response (200 OK):**
+```json
+{
+  "businessId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "type": "Receipt",
+  "transcriptText": "Tengeneza risiti kwa Jane Wanjiku. Mifuko mitano ya sukari kwa shilingi 250 kila moja",
+  "locale": "sw-KE"
+}
+```
+
+**Response Examples:**
+
+**Invoice Response:**
 ```json
 {
   "success": true,
   "message": "Invoice created from voice successfully",
-  "documentId": "invoice-uuid",
+  "documentId": "document-uuid",
   "documentNumber": "INV-202501-0002",
   "urls": {
     "docxUrl": "https://biasharaos.blob.core.windows.net/invoices/INV-202501-0002.docx",
@@ -522,9 +858,81 @@ Content-Type: application/json
 }
 ```
 
-#### 3. Get Invoice Details
+**Receipt Response:**
+```json
+{
+  "success": true,
+  "message": "Receipt created from voice successfully",
+  "documentId": "document-uuid",
+  "documentNumber": "RCPT-202501-0001",
+  "urls": {
+    "docxUrl": "https://biasharaos.blob.core.windows.net/receipts/RCPT-202501-0001.docx",
+    "pdfUrl": "https://biasharaos.blob.core.windows.net/receipts/RCPT-202501-0001.pdf",
+    "previewUrl": "https://biasharaos.blob.core.windows.net/doc-previews/RCPT-202501-0001.png"
+  }
+}
+```
+
+**Quotation Response:**
+```json
+{
+  "success": true,
+  "message": "Quotation created from voice successfully",
+  "documentId": "document-uuid",
+  "documentNumber": "QUO-202501-0001",
+  "urls": {
+    "docxUrl": "https://biasharaos.blob.core.windows.net/quotations/QUO-202501-0001.docx",
+    "pdfUrl": "https://biasharaos.blob.core.windows.net/quotations/QUO-202501-0001.pdf",
+    "previewUrl": "https://biasharaos.blob.core.windows.net/doc-previews/QUO-202501-0001.png"
+  }
+}
+```
+
+#### 3. Sign Document (after rendering)
 ```http
-GET /api/invoices/{invoiceId}
+POST /api/documents/{documentId}/sign
+Authorization: Bearer {jwt-token}
+Content-Type: application/json
+
+{
+  "documentId": "302a871c-0c8f-4d65-17ed-08de236d7832",
+  "signerName": "Jane Wanjiku",
+  "signatureBase64": "iVBORw0KGgoAAAANSUhEUgAAAUAAAABACAYAAAD+08YQAAAAA...",
+  "notes": "Signed on delivery"
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Invoice signed successfully",
+  "documentId": "302a871c-0c8f-4d65-17ed-08de236d7832",
+  "documentNumber": "INV-202511-0006",
+  "urls": {
+    "docxUrl": "https://biasharaos.blob.core.windows.net/invoices/INV-202511-0006.docx",
+    "pdfUrl": "https://biasharaos.blob.core.windows.net/invoices/INV-202511-0006.pdf",
+    "previewUrl": "https://biasharaos.blob.core.windows.net/doc-previews/INV-202511-0006.png"
+  },
+  "signature": {
+    "isSigned": true,
+    "signedBy": "Jane Wanjiku",
+    "signedAt": "2025-01-16T08:15:00Z",
+    "signatureUrl": "https://biasharaos.blob.core.windows.net/document-signatures/INV-202511-0006.png",
+    "notes": "Signed on delivery"
+  }
+}
+```
+
+**Tips**
+- Capture the signature on the Flutter canvas (`ui.Image → PNG → base64`) and send as `signatureBase64`.
+- `signedAt` is automatically set by the server (UTC) when the document is signed.
+- The API regenerates DOCX, PDF, and preview so signatures show up everywhere (mobile preview now matches the PDF layout).
+- Signed documents move to the `Signed` status; edit endpoints will block changes until you void or clone the document.
+
+#### 4. Get Document Details
+```http
+GET /api/documents/{documentId}
 Authorization: Bearer {jwt-token}
 ```
 
@@ -532,9 +940,10 @@ Authorization: Bearer {jwt-token}
 ```json
 {
   "success": true,
-  "message": "Invoice retrieved successfully",
-  "invoice": {
-    "id": "invoice-uuid",
+  "message": "Document retrieved successfully",
+  "document": {
+    "id": "document-uuid",
+    "type": "Invoice",
     "number": "INV-202501-0001",
     "status": "Draft",
     "currency": "KES",
@@ -568,20 +977,20 @@ Authorization: Bearer {jwt-token}
 }
 ```
 
-#### 4. List Invoices with Filters
+#### 5. List Documents with Filters
 ```http
-GET /api/invoices?page=1&pageSize=20&status=Draft&searchTerm=John
+GET /api/documents?page=1&pageSize=20&type=Invoice&status=Draft&searchTerm=John
 Authorization: Bearer {jwt-token}
 ```
 
 **Query Parameters:**
 - `page` (default: 1)
 - `pageSize` (default: 20)
-- `type` (Invoice, Receipt, Quotation)
-- `status` (Draft, Sent, Paid, Overdue, Cancelled)
-- `fromDate` (ISO 8601)
-- `toDate` (ISO 8601)
-- `searchTerm` (searches number and customer name)
+- `type` (Invoice, Receipt, Quotation) - optional filter
+- `status` (Draft, Final, Voided) - optional filter
+- `fromDate` (ISO 8601) - optional filter
+- `toDate` (ISO 8601) - optional filter
+- `searchTerm` (searches number and customer name) - optional filter
 
 **Response (200 OK):**
 ```json
@@ -607,14 +1016,14 @@ Authorization: Bearer {jwt-token}
 }
 ```
 
-#### 5. Update Invoice (Draft Only)
+#### 6. Update Document (Draft Only)
 ```http
-PUT /api/invoices/{invoiceId}
+PUT /api/documents/{documentId}
 Authorization: Bearer {jwt-token}
 Content-Type: application/json
 
 {
-  "invoiceId": "invoice-uuid",
+  "documentId": "document-uuid",
   "customer": {
     "name": "John Kamau Updated",
     "phone": "+254712345678"
@@ -635,34 +1044,13 @@ Content-Type: application/json
 ```json
 {
   "success": true,
-  "message": "Invoice updated successfully",
-  "documentId": "invoice-uuid",
+  "message": "Document updated successfully",
+  "documentId": "document-uuid",
   "documentNumber": "INV-202501-0001"
 }
 ```
 
-#### 6. Share Invoice
-```http
-POST /api/invoices/{invoiceId}/share
-Authorization: Bearer {jwt-token}
-Content-Type: application/json
-
-{
-  "documentId": "invoice-uuid",
-  "channel": "WhatsApp",
-  "target": "+254712345678"
-}
-```
-
-**Response (200 OK):**
-```json
-{
-  "success": true,
-  "message": "Document shared via WhatsApp",
-  "shareLogId": "share-log-uuid",
-  "publicUrl": "https://blob.storage/invoices/INV-202501-0001.pdf"
-}
-```
+**Note**: Sharing functionality is handled on the client side (Flutter mobile app). The API provides document URLs that can be shared directly.
 
 ### Testing the API
 
@@ -696,13 +1084,16 @@ curl -X POST http://localhost:5052/api/auth/business/register \
 
 Save the `businessId` from response.
 
-#### Step 3: Create Invoice
+#### Step 3: Create Document
+
+**Create Invoice:**
 ```bash
-curl -X POST http://localhost:5052/api/invoices \
+curl -X POST http://localhost:5052/api/documents \
   -H "Authorization: Bearer {your-token}" \
   -H "Content-Type: application/json" \
   -d '{
     "businessId": "{your-business-id}",
+    "type": "Invoice",
     "customer": {
       "name": "John Doe",
       "phone": "+254712345678"
@@ -718,50 +1109,501 @@ curl -X POST http://localhost:5052/api/invoices \
   }'
 ```
 
-#### Step 4: Create Voice Invoice
+**Create Receipt:**
 ```bash
-curl -X POST http://localhost:5052/api/invoices/voice \
+curl -X POST http://localhost:5052/api/documents \
   -H "Authorization: Bearer {your-token}" \
   -H "Content-Type: application/json" \
   -d '{
     "businessId": "{your-business-id}",
+    "type": "Receipt",
+    "customer": {
+      "name": "Jane Wanjiku",
+      "phone": "+254712345678"
+    },
+    "lines": [
+      {
+        "name": "Sugar 2kg",
+        "quantity": 5,
+        "unitPrice": 250.00
+      }
+    ],
+    "currency": "KES"
+  }'
+```
+
+**Create Quotation:**
+```bash
+curl -X POST http://localhost:5052/api/documents \
+  -H "Authorization: Bearer {your-token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "businessId": "{your-business-id}",
+    "type": "Quotation",
+    "customer": {
+      "name": "ABC Company Ltd",
+      "phone": "+254712345678"
+    },
+    "lines": [
+      {
+        "name": "Office Supplies",
+        "quantity": 1,
+        "unitPrice": 15000.00
+      }
+    ],
+    "currency": "KES"
+  }'
+```
+
+**Use a Seeded Template**
+
+1. List available templates seeded via the script:
+   ```bash
+   curl -X GET "http://localhost:5052/api/templates" \
+     -H "Authorization: Bearer {your-token}"
+   ```
+2. Pick the `id` for the template you want (e.g., “Modern Blue Invoice”).
+3. Pass it as `templateId` when creating or editing a document. The API will merge the DOCX template with your business data and regenerate DOCX/PDF/preview accordingly.
+
+This lets business owners start with polished layouts without designing templates themselves; the default set mirrors the six styles uploaded by `scripts/seed-templates.sh`.
+
+#### Step 4: Create Document from Voice
+
+**Invoice from Voice:**
+```bash
+curl -X POST http://localhost:5052/api/documents/voice \
+  -H "Authorization: Bearer {your-token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "businessId": "{your-business-id}",
+    "type": "Invoice",
     "transcriptText": "Invoice for Jane with 3 bags of flour at 150 each",
     "locale": "en-KE"
   }'
 ```
 
-#### Step 5: List Invoices
+**Receipt from Voice:**
 ```bash
-curl -X GET "http://localhost:5052/api/invoices?page=1&pageSize=10" \
+curl -X POST http://localhost:5052/api/documents/voice \
+  -H "Authorization: Bearer {your-token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "businessId": "{your-business-id}",
+    "type": "Receipt",
+    "transcriptText": "Receipt for John. Five bags of sugar at 250 each. Payment received",
+    "locale": "en-KE"
+  }'
+```
+
+**Quotation from Voice:**
+```bash
+curl -X POST http://localhost:5052/api/documents/voice \
+  -H "Authorization: Bearer {your-token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "businessId": "{your-business-id}",
+    "type": "Quotation",
+    "transcriptText": "Quotation for ABC Company. One office package at 15000. Valid for 15 days",
+    "locale": "en-KE"
+  }'
+```
+
+#### Step 5: List Documents
+```bash
+# List all documents
+curl -X GET "http://localhost:5052/api/documents?page=1&pageSize=10" \
   -H "Authorization: Bearer {your-token}"
+
+# Filter by type (Invoice, Receipt, or Quotation)
+curl -X GET "http://localhost:5052/api/documents?page=1&pageSize=10&type=Invoice" \
+  -H "Authorization: Bearer {your-token}"
+
+curl -X GET "http://localhost:5052/api/documents?page=1&pageSize=10&type=Receipt" \
+  -H "Authorization: Bearer {your-token}"
+
+curl -X GET "http://localhost:5052/api/documents?page=1&pageSize=10&type=Quotation" \
+  -H "Authorization: Bearer {your-token}"
+```
+
+#### Step 6: Get Document Details
+```bash
+curl -X GET "http://localhost:5052/api/documents/{document-id}" \
+  -H "Authorization: Bearer {your-token}"
+```
+
+#### Step 7: Update Document
+```bash
+curl -X PUT http://localhost:5052/api/documents/{document-id} \
+  -H "Authorization: Bearer {your-token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "documentId": "{document-id}",
+    "notes": "Updated payment terms"
+  }'
+```
+
+#### Step 8: Sign Document (mobile signature → server)
+```bash
+curl -X POST http://localhost:5052/api/documents/{document-id}/sign \
+  -H "Authorization: Bearer {your-token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "documentId": "{document-id}",
+    "signerName": "Delivery Agent",
+    "signatureBase64": "{base64-png}",
+    "notes": "Signed on delivery"
+  }'
+```
+
+Expect the response to include an updated `signature` block plus refreshed DOCX/PDF/preview URLs.
+
+#### Step 9: Create a themed document
+```bash
+curl -X POST http://localhost:5052/api/documents \
+  -H "Authorization: Bearer {your-token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "businessId": "{your-business-id}",
+    "type": "Invoice",
+    "theme": {
+      "primaryColor": "#0F172A",
+      "secondaryColor": "#475569",
+      "accentColor": "#F97316",
+      "fontFamily": "Poppins"
+    },
+    "customer": { "name": "Theme Test" },
+    "lines": [{ "name": "Brand Kit", "quantity": 1, "unitPrice": 2500 }],
+    "currency": "KES"
+  }'
+```
+
+Preview image now mirrors the QuestPDF layout (full header/table/signature styling), so the mobile app can display exactly what the PDF looks like.
+
+#### Step 10: List Available Templates
+```bash
+# List all templates
+curl -X GET "http://localhost:5052/api/templates" \
+  -H "Authorization: Bearer {your-token}"
+
+# Filter templates by document type (Invoice, Receipt, or Quotation)
+curl -X GET "http://localhost:5052/api/templates?type=Invoice" \
+  -H "Authorization: Bearer {your-token}"
+
+curl -X GET "http://localhost:5052/api/templates?type=Receipt" \
+  -H "Authorization: Bearer {your-token}"
+
+curl -X GET "http://localhost:5052/api/templates?type=Quotation" \
+  -H "Authorization: Bearer {your-token}"
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Found 6 template(s)",
+  "templates": [
+    {
+      "id": "1b351696-f113-4c58-a23a-3afbd27114de",
+      "type": "Invoice",
+      "name": "Modern Blue",
+      "version": 1,
+      "blobUrl": "global/Invoice/modern-blue-v1.docx",
+      "previewUrl": "https://biasharaos.blob.core.windows.net/doc-previews/1b351696-f113-4c58-a23a-3afbd27114de.png",
+      "theme": {
+        "primaryColor": "#1E40AF",
+        "secondaryColor": "#3B82F6",
+        "accentColor": "#60A5FA",
+        "fontFamily": "Inter"
+      },
+      "isDefault": true,
+      "createdAt": "2025-01-15T10:00:00Z"
+    },
+    {
+      "id": "3acba4d8-19af-4a7a-a41d-88488bb1676c",
+      "type": "Invoice",
+      "name": "Classic Green",
+      "version": 1,
+      "blobUrl": "global/Invoice/classic-green-v1.docx",
+      "previewUrl": "https://biasharaos.blob.core.windows.net/doc-previews/3acba4d8-19af-4a7a-a41d-88488bb1676c.png",
+      "theme": {
+        "primaryColor": "#065F46",
+        "secondaryColor": "#047857",
+        "accentColor": "#10B981",
+        "fontFamily": "Poppins"
+      },
+      "isDefault": false,
+      "createdAt": "2025-01-15T10:00:00Z"
+    }
+  ]
+}
+```
+
+#### Step 11: Get Template Details
+```bash
+curl -X GET "http://localhost:5052/api/templates/{template-id}" \
+  -H "Authorization: Bearer {your-token}"
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Template retrieved successfully",
+  "template": {
+    "id": "1b351696-f113-4c58-a23a-3afbd27114de",
+    "type": "Invoice",
+    "name": "Modern Blue",
+    "version": 1,
+    "blobUrl": "global/Invoice/modern-blue-v1.docx",
+    "previewUrl": "https://biasharaos.blob.core.windows.net/doc-previews/1b351696-f113-4c58-a23a-3afbd27114de.png",
+    "theme": {
+      "primaryColor": "#1E40AF",
+      "secondaryColor": "#3B82F6",
+      "accentColor": "#60A5FA",
+      "fontFamily": "Inter"
+    },
+    "isDefault": true,
+    "createdAt": "2025-01-15T10:00:00Z"
+  }
+}
+```
+
+#### Step 12: Create Document Using a Template
+```bash
+# Create invoice using a specific template
+curl -X POST http://localhost:5052/api/documents \
+  -H "Authorization: Bearer {your-token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "businessId": "{your-business-id}",
+    "type": "Invoice",
+    "templateId": "1b351696-f113-4c58-a23a-3afbd27114de",
+    "customer": {
+      "name": "John Doe",
+      "phone": "+254712345678"
+    },
+    "lines": [
+      {
+        "name": "Product A",
+        "quantity": 2,
+        "unitPrice": 100.00
+      }
+    ],
+    "currency": "KES"
+  }'
+```
+
+**Note**: When `templateId` is provided, the document will be generated using the template's layout and theme. You can still override the theme by providing a `theme` object in the request.
+
+#### Step 13: Create Document Without Template (From Scratch)
+```bash
+# Create invoice without template (uses default programmatic generation)
+curl -X POST http://localhost:5052/api/documents \
+  -H "Authorization: Bearer {your-token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "businessId": "{your-business-id}",
+    "type": "Invoice",
+    "customer": {
+      "name": "John Doe",
+      "phone": "+254712345678"
+    },
+    "lines": [
+      {
+        "name": "Product A",
+        "quantity": 2,
+        "unitPrice": 100.00
+      }
+    ],
+    "currency": "KES"
+  }'
+```
+
+**Note**: When `templateId` is omitted, the system uses programmatic document generation (OpenXmlDocumentGenerator) with default styling.
+
+### Templates API Endpoints
+
+#### 1. List Templates
+```http
+GET /api/templates?type={Invoice|Receipt|Quotation}
+Authorization: Bearer {jwt-token}
+```
+
+**Query Parameters:**
+- `type` (optional) - Filter by document type: `Invoice`, `Receipt`, or `Quotation`
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Found 6 template(s)",
+  "templates": [
+    {
+      "id": "template-uuid",
+      "type": "Invoice",
+      "name": "Modern Blue",
+      "version": 1,
+      "blobUrl": "global/Invoice/modern-blue-v1.docx",
+      "previewUrl": "https://biasharaos.blob.core.windows.net/doc-previews/template-uuid.png",
+      "theme": {
+        "primaryColor": "#1E40AF",
+        "secondaryColor": "#3B82F6",
+        "accentColor": "#60A5FA",
+        "fontFamily": "Inter"
+      },
+      "isDefault": true,
+      "createdAt": "2025-01-15T10:00:00Z"
+    }
+  ]
+}
+```
+
+#### 2. Get Template by ID
+```http
+GET /api/templates/{templateId}
+Authorization: Bearer {jwt-token}
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Template retrieved successfully",
+  "template": {
+    "id": "template-uuid",
+    "type": "Invoice",
+    "name": "Modern Blue",
+    "version": 1,
+    "blobUrl": "global/Invoice/modern-blue-v1.docx",
+    "previewUrl": "https://biasharaos.blob.core.windows.net/doc-previews/template-uuid.png",
+    "theme": {
+      "primaryColor": "#1E40AF",
+      "secondaryColor": "#3B82F6",
+      "accentColor": "#60A5FA",
+      "fontFamily": "Inter"
+    },
+    "isDefault": true,
+    "createdAt": "2025-01-15T10:00:00Z"
+  }
+}
+```
+
+### Using Templates When Creating Documents
+
+When creating documents, you have two options:
+
+1. **Use a Template** (Recommended for consistent branding):
+   - First, call `GET /api/templates` to see available templates
+   - Select a template that matches your document type
+   - Include the `templateId` in your document creation request
+   - The document will be generated using the template's layout and styling
+
+2. **Create From Scratch** (Custom styling):
+   - Omit the `templateId` field
+   - Optionally provide a custom `theme` object to override default colors/fonts
+   - The system uses programmatic generation with your custom theme
+
+**Example: Create Invoice with Template**
+```json
+{
+  "businessId": "business-uuid",
+  "type": "Invoice",
+  "templateId": "1b351696-f113-4c58-a23a-3afbd27114de",
+  "customer": {
+    "name": "John Doe",
+    "phone": "+254712345678"
+  },
+  "lines": [
+    {
+      "name": "Product A",
+      "quantity": 2,
+      "unitPrice": 100.00
+    }
+  ],
+  "currency": "KES"
+}
+```
+
+**Example: Create Invoice Without Template (Custom Theme)**
+```json
+{
+  "businessId": "business-uuid",
+  "type": "Invoice",
+  "theme": {
+    "primaryColor": "#0F172A",
+    "secondaryColor": "#475569",
+    "accentColor": "#F97316",
+    "fontFamily": "Poppins"
+  },
+  "customer": {
+    "name": "John Doe",
+    "phone": "+254712345678"
+  },
+  "lines": [
+    {
+      "name": "Product A",
+      "quantity": 2,
+      "unitPrice": 100.00
+    }
+  ],
+  "currency": "KES"
+}
+```
+
+**Example: Create Invoice Without Template (Default Styling)**
+```json
+{
+  "businessId": "business-uuid",
+  "type": "Invoice",
+  "customer": {
+    "name": "John Doe",
+    "phone": "+254712345678"
+  },
+  "lines": [
+    {
+      "name": "Product A",
+      "quantity": 2,
+      "unitPrice": 100.00
+    }
+  ],
+  "currency": "KES"
+}
 ```
 
 ### How It Works
 
-#### Voice-to-Invoice Flow
-1. **Mobile App**: User speaks invoice details in English or Swahili
+#### Voice-to-Document Flow
+1. **Mobile App**: User speaks document details in English or Swahili
 2. **Transcription**: Mobile transcribes locally (offline) or sends audio to API
 3. **AI Extraction**: Azure OpenAI extracts structured data (customer, items, prices)
 4. **Validation**: System validates totals, tax calculations, required fields
-5. **Generation**: Creates DOCX using OpenXML (editable)
-6. **Storage**: Uploads to Azure Blob Storage
-7. **Response**: Returns document URLs to mobile app
+5. **Generation**: Creates DOCX using OpenXML and PDF using QuestPDF
+6. **Storage**: Uploads to Azure Blob Storage (separate containers per document type)
+7. **Response**: Returns document URLs (DOCX, PDF, preview) to mobile app
 
-#### Manual Invoice Flow
-1. **Mobile App**: User fills form with customer and line items
+#### Manual Document Flow
+1. **Mobile App**: User fills form with document type, customer, and line items
 2. **Validation**: FluentValidation checks all business rules
 3. **Calculation**: System computes subtotal, tax, total
-4. **Numbering**: Auto-generates invoice number (INV-202501-0001)
-5. **Generation**: Creates DOCX with business branding
+4. **Numbering**: Auto-generates document number based on type (INV-202501-0001, RCPT-202501-0001, QUO-202501-0001)
+5. **Generation**: Creates DOCX and PDF with business branding
 6. **Storage**: Uploads to Azure Blob Storage
 7. **Response**: Returns document URLs
 
 #### Document Rendering
-- **DOCX**: OpenXML programmatic generation (no templates needed)
-- **PDF**: Coming soon (QuestPDF integration)
-- **Validation**: FluentValidation for business rules
-- **Auditing**: ShareLog tracks all shares
-- **Numbering**: Format: {prefix}{yyyyMM}-{sequence} per business
+- **DOCX**: OpenXML programmatic generation with business branding (OpenXmlDocumentGenerator)
+- **PDF**: QuestPDF integration (QuestPdfDocumentGenerator)
+- **Validation**: FluentValidation for business rules (required fields, tax calculations)
+- **Numbering**: Format: `{prefix}{yyyyMM}-{####}` per business and document type
+  - Invoices: `INV-202501-0001`
+  - Receipts: `RCPT-202501-0001`
+  - Quotations: `QUO-202501-0001`
+- **Storage**: Azure Blob Storage with organized containers:
+  - `invoices/` - Invoice documents
+  - `receipts/` - Receipt documents
+  - `quotations/` - Quotation documents
+  - `doc-previews/` - Preview images for all document types
+  - `document-signatures/` - Handwritten signatures uploaded from the mobile app
 
 ---
 
@@ -782,44 +1624,106 @@ curl -X GET "http://localhost:5052/api/invoices?page=1&pageSize=10" \
 ### Project Structure
 ```
 src/ApiWorker/
-├── Authentication/       # Auth module (signup, login, JWT)
-├── Documents/            # Documents module (invoices, receipts)
-├── Data/                 # EF Core DbContext
-├── Middleware/           # Custom middleware
-└── Program.cs            # App entry point
+├── Authentication/       # Auth module (signup, login, JWT, OAuth, multi-business)
+│   ├── Controllers/      # AuthController
+│   ├── Services/         # AuthenticationService, ICurrentUserService
+│   ├── Entities/         # AppUser, Business, Membership, Template
+│   ├── DTOs/             # AuthDtos (requests/responses)
+│   ├── Middleware/       # CurrentUserMiddleware
+│   └── Extensions/       # AuthServiceCollectionExtensions
+├── Documents/            # Documents module (invoices, receipts, quotations)
+│   ├── Controllers/      # DocumentsController
+│   ├── Services/         # DocumentService, VoiceIntentService, TemplateService
+│   ├── Core/Entities/    # Document, TransactionalDocument, Invoice, Receipt, Quotation
+│   ├── DTOs/             # TransactionalDocumentDtos, DocumentDtos, ExtractedDocumentData
+│   └── Validators/       # DocumentValidators (FluentValidation)
+├── Speech/               # Speech-to-Text module (Azure Speech SDK)
+│   ├── Services/         # AzureSpeechToTextService, SpeechCaptureService
+│   ├── Storage/          # CosmosTranscriptionStore
+│   └── Interfaces/       # ISpeechToTextService, ISpeechCaptureService
+├── Data/                 # EF Core DbContext, Migrations
+├── Storage/              # BlobStorageService (Azure Blob Storage)
+├── Cosmos/               # Cosmos DB configuration
+├── Configuration/        # Key Vault, Storage extensions
+└── Program.cs            # App entry point, DI registration
 
-tests/
-└── ApiWorker.UnitTests/  # Unit tests
+scripts/
+├── migrate.sh            # EF Core migration helper
+├── deploy-azure-container-apps.sh
+├── setup-azure-auth.sh
+└── setup-keyvault.sh
+
+bicep/                    # Infrastructure as Code (Azure)
+└── main.bicep
+
+Dockerfile                # Container image definition
 ```
 
-### Testing
+### Key Modules
+
+1. **Authentication Module**: User management, JWT tokens, business registration, multi-business support
+2. **Documents Module**: Document creation (Invoice/Receipt/Quotation, manual/voice), document rendering (DOCX/PDF)
+3. **Speech Module**: Azure Speech-to-Text integration, transcription storage in Cosmos DB
+4. **Storage Module**: Azure Blob Storage for documents, templates, and business logos
+5. **Cosmos Module**: Cosmos DB for high-volume transcript storage
+
+### Docker & Deployment
+
+#### Build Docker Image
 ```bash
-# Run all tests
-dotnet test
-
-# Run specific test
-dotnet test --filter "FullyQualifiedName~AuthenticationServiceTests"
+docker build -t biasharaos-api-worker:latest .
 ```
+
+#### Run Locally with Docker
+```bash
+docker run -p 8000:8000 \
+  -e ConnectionStrings__Default="Server=..." \
+  -e Auth__Jwt__SecretKey="..." \
+  biasharaos-api-worker:latest
+```
+
+#### Deploy to Azure Container Apps
+```bash
+# Using provided script
+./scripts/deploy-azure-container-apps.sh
+
+# Or using Bicep
+az deployment group create \
+  --resource-group biasharaos-rg \
+  --template-file bicep/main.bicep \
+  --parameters @bicep/parameters.dev.json
+```
+
+#### Environment Variables (Production)
+- `ConnectionStrings--Default`: Azure SQL connection string
+- `ConnectionStrings--BlobStorage`: Azure Blob Storage connection string
+- `Cosmos--Endpoint`: Cosmos DB endpoint
+- `Cosmos--Key`: Cosmos DB key
+- `Auth--Jwt--SecretKey`: JWT signing key (min 32 chars)
+- `Auth--Supabase--Url`: Supabase project URL
+- `Auth--Supabase--Key`: Supabase anon key
+- `Speech--Key`: Azure Speech service key
+- `AzureOpenAI--Endpoint`: Azure OpenAI endpoint
+- `AzureOpenAI--ApiKey`: Azure OpenAI API key
+
+**Note**: In production, these should be stored in Azure Key Vault and loaded automatically.
 
 ### Common Issues
 
-**Issue**: "Business not found" when creating invoice
-- **Solution**: Ensure you've registered a business first using `/auth/business/register`
+**Issue**: "Business not found" when creating document
+- **Solution**: Register a business first using `/auth/business/register`
 
-**Issue**: "Transcript text is required" for voice invoice
-- **Solution**: Provide `transcriptText` field with the spoken invoice details
+**Issue**: "Document type must be Invoice, Receipt, or Quotation"
+- **Solution**: Set `type` to "Invoice", "Receipt", or "Quotation" (case-sensitive)
 
-**Issue**: "Only draft invoices can be edited"
-- **Solution**: You can only update invoices with status "Draft". Once sent/paid, they're locked.
+**Issue**: "Only draft documents can be edited"
+- **Solution**: Only documents with status "Draft" can be updated
 
 **Issue**: 401 Unauthorized
 - **Solution**: Include `Authorization: Bearer {token}` header in all authenticated requests
 
----
-
-## License
-
-Proprietary - BiasharaOS © 2024
+**Issue**: "Transcript text is required" for voice document
+- **Solution**: Provide `transcriptText` or `audioBlobUrl` in the request
 
 ---
 
@@ -830,7 +1734,3 @@ Proprietary - BiasharaOS © 2024
 - **401 Unauthorized**: Missing or invalid JWT token
 - **404 Not Found**: Resource doesn't exist
 - **500 Internal Server Error**: Server error (check logs)
-
-## Support
-
-For issues or questions, contact: support@biasharaos.com

@@ -2,7 +2,6 @@
 // src/ApiWorker/Documents/Entities/Document.cs
 using System;
 using System.Collections.Generic;
-using ApiWorker.Documents.Enums;
 
 namespace ApiWorker.Documents.Entities;
 
@@ -17,6 +16,7 @@ public abstract class Document
     // Ownership / scope
     public Guid BusinessId { get; set; }         // FK -> Business.Id
     public Guid CreatedByUserId { get; set; }    // FK -> AppUser.Id
+    public Guid? TemplateId { get; set; }
 
     // Identity & lifecycle
     public DocumentType Type { get; set; }
@@ -42,6 +42,13 @@ public abstract class Document
     // Optional pointer to NoSQL (Cosmos) for the rendered JSON snapshot
     public string? CosmosId { get; set; }
 
+    // Theme snapshot & signature metadata
+    public string? AppliedThemeJson { get; set; }
+    public string? SignatureBlobUrl { get; set; }
+    public string? SignedBy { get; set; }
+    public DateTimeOffset? SignedAt { get; set; }
+    public string? SignatureNotes { get; set; }
+
     // Audit
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
@@ -52,5 +59,4 @@ public abstract class Document
     // Navigation (optional to keep compile-time independence from Auth module)
     // public Business Business { get; set; } = default!;
     // public AppUser CreatedBy { get; set; } = default!;
-    public ICollection<ShareLog> ShareLogs { get; set; } = new List<ShareLog>();
 }
