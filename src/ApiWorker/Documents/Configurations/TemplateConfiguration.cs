@@ -16,6 +16,8 @@ public sealed class TemplateConfiguration : IEntityTypeConfiguration<Template>
         b.Property(x => x.Name).HasMaxLength(128).IsRequired();
         b.Property(x => x.BlobPath).HasMaxLength(256).IsRequired();
         b.Property(x => x.FieldsJson).HasColumnType("nvarchar(max)");
+        b.Property(x => x.ThemeJson).HasColumnType("nvarchar(max)");
+        b.Property(x => x.PreviewBlobUrl).HasMaxLength(512);
 
         // Timestamps
         b.Property(x => x.CreatedAt).IsRequired();

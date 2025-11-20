@@ -7,6 +7,7 @@ public enum DocumentStatus
     Draft = 0,
     Final = 1,
     Shared = 2,
-    Voided = 3
+    Voided = 3,
+    Signed = 4
 }
 

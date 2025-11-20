@@ -43,15 +43,6 @@ public static class DocumentServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
-        /// <summary>
-        /// Share settings: WhatsApp API credentials, public URLs.
-        /// Binds from appsettings.json section "Share".
-        /// </summary>
-        services.AddOptions<ShareSettings>()
-            .Bind(configuration.GetSection("Share"))
-            .ValidateDataAnnotations()
-            .ValidateOnStart();
-
         services.AddOptions<AzureOpenAISettings>()
             .Bind(configuration.GetSection("AzureOpenAI"));
 
@@ -62,7 +53,10 @@ public static class DocumentServiceCollectionExtensions
         services.AddValidatorsFromAssemblyContaining<DocumentMappingProfile>();
 
         // ===== SERVICE REGISTRATION =====
-        services.AddScoped<IDocumentService, InvoiceService>();
+        services.AddScoped<ITemplateService, TemplateService>();
+        services.AddScoped<TemplateDocumentGenerator>();
+        services.AddScoped<TemplatePreviewGenerator>();
+        services.AddScoped<IDocumentService, DocumentService>();
         services.AddSingleton<IVoiceIntentService, VoiceIntentService>();
 
         return services;

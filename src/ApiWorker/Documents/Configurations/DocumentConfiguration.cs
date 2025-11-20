@@ -14,7 +14,8 @@ public sealed class DocumentConfiguration : IEntityTypeConfiguration<Document>
         // Single Table Inheritance discriminator
         b.HasDiscriminator<DocumentType>("Type")
             .HasValue<Invoice>(DocumentType.Invoice)
-            .HasValue<TransactionalDocument>(DocumentType.Invoice);
+            .HasValue<Receipt>(DocumentType.Receipt)
+            .HasValue<Quotation>(DocumentType.Quotation);
 
         // Base properties
         b.Property(x => x.Type).IsRequired();
@@ -36,11 +37,19 @@ public sealed class DocumentConfiguration : IEntityTypeConfiguration<Document>
         // Storage
         b.Property(x => x.DocxBlobUrl).HasMaxLength(512);
         b.Property(x => x.PdfBlobUrl).HasMaxLength(512);
+        b.Property(x => x.PreviewBlobUrl).HasMaxLength(512);
         b.Property(x => x.CosmosId).HasMaxLength(128);
+        b.Property(x => x.SignatureBlobUrl).HasMaxLength(512);
+        b.Property(x => x.SignedBy).HasMaxLength(128);
+        b.Property(x => x.SignatureNotes).HasMaxLength(512);
+        b.Property(x => x.AppliedThemeJson).HasColumnType("nvarchar(max)");
 
         // Ownership
         b.HasIndex(x => x.BusinessId);
         b.HasIndex(x => x.CreatedByUserId);
+
+        // Template reference
+        b.HasIndex(x => x.TemplateId);
 
         // Unique: (Business, Type, Number)
         b.HasIndex(x => new { x.BusinessId, x.Type, x.Number }).IsUnique();

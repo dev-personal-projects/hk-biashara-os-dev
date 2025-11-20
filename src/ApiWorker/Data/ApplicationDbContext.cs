@@ -21,9 +21,10 @@ public sealed class ApplicationDbContext : DbContext
     public DbSet<ApiWorker.Documents.Entities.Document> Documents => Set<ApiWorker.Documents.Entities.Document>();
     public DbSet<ApiWorker.Documents.Entities.TransactionalDocument> TransactionalDocuments => Set<ApiWorker.Documents.Entities.TransactionalDocument>();
     public DbSet<ApiWorker.Documents.Entities.Invoice> Invoices => Set<ApiWorker.Documents.Entities.Invoice>();
+    public DbSet<ApiWorker.Documents.Entities.Receipt> Receipts => Set<ApiWorker.Documents.Entities.Receipt>();
+    public DbSet<ApiWorker.Documents.Entities.Quotation> Quotations => Set<ApiWorker.Documents.Entities.Quotation>();
     public DbSet<ApiWorker.Documents.Entities.TransactionalDocumentLine> TransactionalDocumentLines => Set<ApiWorker.Documents.Entities.TransactionalDocumentLine>();
     public DbSet<DocTemplate> DocumentTemplates => Set<DocTemplate>();
-    public DbSet<ApiWorker.Documents.Entities.ShareLog> ShareLogs => Set<ApiWorker.Documents.Entities.ShareLog>();
 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -45,6 +46,12 @@ public sealed class ApplicationDbContext : DbContext
             .WithMany()
             .HasForeignKey(d => d.CreatedByUserId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Document>()
+            .HasOne<DocTemplate>()
+            .WithMany()
+            .HasForeignKey(d => d.TemplateId)
+            .OnDelete(DeleteBehavior.SetNull);
 
         // Foreign key relationship: DocumentTemplate -> Business
         modelBuilder.Entity<DocTemplate>()
