@@ -55,6 +55,7 @@ validate_configuration() {
     "LOG_FOLDER"
     "PROJECT_RESOURCE_GROUP"
     "PROJECT_SUBSCRIPTION_ID"
+    "ACR_NAME"
   )
   for var in "${required_vars[@]}"; do
     if [[ -z "${!var:-}" ]]; then
@@ -62,6 +63,13 @@ validate_configuration() {
       return 1
     fi
   done
+  
+  log_info "Configuration validated:"
+  log_info "  Environment: $ENVIRONMENT_PREFIX"
+  log_info "  Project: $PROJECT_PREFIX"
+  log_info "  Location: $PROJECT_LOCATION"
+  log_info "  Resource Group: $PROJECT_RESOURCE_GROUP"
+  log_info "  ACR Name: $ACR_NAME"
 }
 
 # ----- Azure Context -----
@@ -111,6 +119,8 @@ provision_infra_bicep() {
   local bicep_dir="${project_root}/bicep"
   local template_file="${bicep_dir}/main.bicep"
   local params_file="${bicep_dir}/parameters.${ENVIRONMENT_PREFIX}.json"
+  local repo_url="${REPOSITORY_URL:-https://github.com/dev-personal-projects/hk-biashara-os-dev}"
+  local branch="${GIT_BRANCH:-dev}"
 
   if [[ ! -f "$template_file" ]]; then
     log_error "Bicep template not found at: $template_file"
@@ -123,41 +133,44 @@ provision_infra_bicep() {
     az deployment group create \
       --resource-group "$PROJECT_RESOURCE_GROUP" \
       --template-file "$template_file" \
-      --parameters @"$params_file"
+      --parameters @"$params_file" \
+      --parameters location="$PROJECT_LOCATION" \
+                   repositoryUrl="$repo_url" \
+                   branch="$branch"
   else
     log_warning "Parameters file not found at ${params_file}. Using inline parameters."
     az deployment group create \
       --resource-group "$PROJECT_RESOURCE_GROUP" \
       --template-file "$template_file" \
       --parameters environment="$ENVIRONMENT_PREFIX" \
-                   repositoryUrl="https://github.com/dev-personal-projects/hk-biashara-os-dev" \
-                   branch="dev" \
+                   repositoryUrl="$repo_url" \
+                   branch="$branch" \
                    location="$PROJECT_LOCATION"
   fi
 }
 
 # ----- Prepare ACR -----
 prepare_container_registry() {
-  local registry_name="${ENVIRONMENT_PREFIX}${PROJECT_PREFIX}contregistry"
-  log_info "Checking Azure Container Registry: $registry_name"
+  log_info "Checking Azure Container Registry: $ACR_NAME"
 
-  if ! az acr show --name "$registry_name" &>/dev/null; then
+  if ! az acr show --name "$ACR_NAME" &>/dev/null; then
     log_warning "Container Registry does not exist. Creating..."
     az acr create \
-      --name "$registry_name" \
+      --name "$ACR_NAME" \
       --resource-group "$PROJECT_RESOURCE_GROUP" \
       --sku Basic \
-      --admin-enabled true
+      --admin-enabled true \
+      --location "$PROJECT_LOCATION"
   fi
 
-  az acr login --name "$registry_name"
+  az acr login --name "$ACR_NAME"
 }
 
 # ----- Prepare Container Apps Environment -----
 prepare_container_apps_environment() {
-  local environment_name="${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}-BackendContainerAppsEnv-dev"
+  local environment_name="${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}-BackendContainerAppsEnv"
   local container_app_name="${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}-worker"
-  local registry_url="${ENVIRONMENT_PREFIX}${PROJECT_PREFIX}contregistry.azurecr.io"
+  local registry_url="${ACR_NAME}.azurecr.io"
 
   log_info "Preparing Container Apps Environment: $environment_name"
 
@@ -178,28 +191,44 @@ prepare_container_apps_environment() {
 deploy_container_app() {
   local environment_name="${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}-BackendContainerAppsEnv"
   local container_app_name="${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}-worker"
-  local registry_url="${ENVIRONMENT_PREFIX}${PROJECT_PREFIX}contregistry.azurecr.io"
-  local repo_url="https://github.com/dev-personal-projects/hk-biashara-os-dev"
-  local branch="dev"
-  local client_id="b744d9b5-68b1-4e3e-82d6-93698d50a3fb"
-  local client_secret="wP18Q~FVBlhquwxUh4X7EP.nbmXcbZsLGpRyfbzV"
-  local tenant_id="55d15577-df36-46ee-9782-f7b38ae4ea3c"
+  local registry_url="${ACR_NAME}.azurecr.io"
+  local repo_url="${REPOSITORY_URL:-https://github.com/dev-personal-projects/hk-biashara-os-dev}"
+  local branch="${GIT_BRANCH:-dev}"
+  local client_id="${SERVICE_PRINCIPAL_CLIENT_ID:-}"
+  local client_secret="${SERVICE_PRINCIPAL_CLIENT_SECRET:-}"
+  local tenant_id="${SERVICE_PRINCIPAL_TENANT_ID:-}"
   local keyvault_name="${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}-kv"
+  local target_port="${TARGET_PORT:-8080}"
 
   log_info "Deploying Container App: $container_app_name"
+  log_info "Using registry: $registry_url"
+  log_info "Target port: $target_port"
 
-  az containerapp up \
-    --name "$container_app_name" \
-    --resource-group "$PROJECT_RESOURCE_GROUP" \
-    --environment "$environment_name" \
-    --repo "$repo_url" \
-    --branch "$branch" \
-    --registry-server "$registry_url" \
-    --service-principal-client-id "$client_id" \
-    --service-principal-client-secret "$client_secret" \
-    --service-principal-tenant-id "$tenant_id" \
-    --ingress external \
-    --target-port 8080
+  # Build arguments for containerapp up
+  local up_args=(
+    --name "$container_app_name"
+    --resource-group "$PROJECT_RESOURCE_GROUP"
+    --environment "$environment_name"
+    --repo "$repo_url"
+    --branch "$branch"
+    --registry-server "$registry_url"
+    --ingress external
+    --target-port "$target_port"
+  )
+
+  # Add service principal credentials if provided
+  if [[ -n "$client_id" && -n "$client_secret" && -n "$tenant_id" ]]; then
+    up_args+=(
+      --service-principal-client-id "$client_id"
+      --service-principal-client-secret "$client_secret"
+      --service-principal-tenant-id "$tenant_id"
+    )
+    log_info "Using service principal authentication"
+  else
+    log_warning "Service principal credentials not provided. Using default authentication."
+  fi
+
+  az containerapp up "${up_args[@]}"
 
   log_info "Enabling managed identity for Container App"
   az containerapp identity assign \
@@ -215,19 +244,27 @@ deploy_container_app() {
     --memory 0.5Gi \
     --min-replicas 1 \
     --max-replicas 10 \
-    --set-env-vars "KeyVaultName=$keyvault_name" "ASPNETCORE_ENVIRONMENT=Production" "ASPNETCORE_HTTP_PORTS=8080"
+    --set-env-vars "KeyVaultName=$keyvault_name" \
+                   "ASPNETCORE_ENVIRONMENT=Production" \
+                   "ASPNETCORE_HTTP_PORTS=$target_port" \
+                   "ASPNETCORE_URLS=http://+:$target_port"
 
   log_info "Granting Container App access to Key Vault"
   local principal_id
   principal_id=$(az containerapp show \
     --name "$container_app_name" \
     --resource-group "$PROJECT_RESOURCE_GROUP" \
-    --query "identity.principalId" -o tsv)
+    --query "identity.principalId" -o tsv 2>/dev/null || echo "")
 
-  az keyvault set-policy \
-    --name "$keyvault_name" \
-    --object-id "$principal_id" \
-    --secret-permissions get list
+  if [[ -n "$principal_id" ]]; then
+    az keyvault set-policy \
+      --name "$keyvault_name" \
+      --object-id "$principal_id" \
+      --secret-permissions get list
+    log_success "Key Vault access granted to Container App"
+  else
+    log_warning "Could not retrieve principal ID. Key Vault access may need to be configured manually."
+  fi
 }
 
 # ----- Main -----

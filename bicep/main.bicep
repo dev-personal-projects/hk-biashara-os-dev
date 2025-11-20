@@ -76,6 +76,7 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
         external: true
         targetPort: 8080
         allowInsecure: false
+        transport: 'auto'
         traffic: [
           {
             weight: 100
@@ -107,6 +108,20 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
             cpu: json(cpu)
             memory: memory
           }
+          env: [
+            {
+              name: 'ASPNETCORE_ENVIRONMENT'
+              value: 'Production'
+            }
+            {
+              name: 'ASPNETCORE_HTTP_PORTS'
+              value: '8080'
+            }
+            {
+              name: 'ASPNETCORE_URLS'
+              value: 'http://+:8080'
+            }
+          ]
         }
       ]
       scale: {
