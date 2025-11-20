@@ -26,9 +26,12 @@ public sealed class DocumentService : IDocumentService
     private readonly IBlobStorageService _blobStorage;
     private readonly IVoiceIntentService _voiceIntent;
     private readonly ICurrentUserService _currentUser;
+    private readonly ITemplateService? _templateService;
+    private readonly TemplateDocumentGenerator? _templateGenerator;
     private readonly DocumentSettings _settings;
     private readonly ILogger<DocumentService> _logger;
     private const string SignatureContainerName = "document-signatures";
+
 
     public DocumentService(
         ApplicationDbContext db,
@@ -36,6 +39,8 @@ public sealed class DocumentService : IDocumentService
         IBlobStorageService blobStorage,
         IVoiceIntentService voiceIntent,
         ICurrentUserService currentUser,
+        ITemplateService? templateService,
+        TemplateDocumentGenerator? templateGenerator,
         IOptions<DocumentSettings> settings,
         ILogger<DocumentService> logger)
     {
@@ -44,6 +49,8 @@ public sealed class DocumentService : IDocumentService
         _blobStorage = blobStorage;
         _voiceIntent = voiceIntent;
         _currentUser = currentUser;
+        _templateService = templateService;
+        _templateGenerator = templateGenerator;
         _settings = settings.Value;
         _logger = logger;
     }
@@ -749,12 +756,42 @@ public sealed class DocumentService : IDocumentService
             var theme = DocumentTheme.FromJson(document.AppliedThemeJson);
             var signature = await BuildSignatureRenderAsync(document, ct);
 
-            using var docxStream = OpenXmlDocumentGenerator.GenerateDocument(document, business, theme, signature);
+            MemoryStream docxStream;
+
+            // Use template if TemplateId is provided and services are available
+            if (document.TemplateId.HasValue && _templateService != null && _templateGenerator != null)
+            {
+                var template = await _templateService.GetTemplateAsync(document.TemplateId.Value, ct);
+                if (template != null && !string.IsNullOrWhiteSpace(template.BlobPath))
+                {
+                    // Merge template
+                    docxStream = await _templateGenerator.MergeTemplateAsync(
+                        template.BlobPath,
+                        document,
+                        business,
+                        theme,
+                        signature,
+                        ct);
+                }
+                else
+                {
+                    // Fallback to programmatic generation
+                    _logger.LogWarning("Template {TemplateId} not found, using programmatic generation", document.TemplateId);
+                    docxStream = OpenXmlDocumentGenerator.GenerateDocument(document, business, theme, signature);
+                }
+            }
+            else
+            {
+                // Use programmatic generation
+                docxStream = OpenXmlDocumentGenerator.GenerateDocument(document, business, theme, signature);
+            }
+
             docxStream.Position = 0;
             var docxFileName = $"{document.Number}.docx";
             var containerName = GetContainerName(document.Type);
             var docxUrl = await _blobStorage.UploadAsync(docxStream, docxFileName, containerName, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ct);
 
+            // Always use QuestPDF for PDF generation (can be enhanced to convert DOCX to PDF if needed)
             var pdfBytes = QuestPdfDocumentGenerator.GenerateDocumentPdf(document, business, theme, signature);
             using var pdfStream = new MemoryStream(pdfBytes);
             pdfStream.Position = 0;

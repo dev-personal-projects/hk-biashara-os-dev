@@ -96,10 +96,16 @@
 
 # Run API
 dotnet run --project src/ApiWorker
+
+# (Optional) Seed default DOCX templates + previews
+./scripts/seed-templates.sh
 ```
 
 **Local API**: `http://localhost:5052/api`  
 **OpenAPI/Swagger**: `http://localhost:5052/openapi/v1.json` (Development only)
+
+> **Why seed templates?**  
+> The seeding script loads your Azure Key Vault secret `ConnectionStrings--BlobStorage`, creates the `doc-templates`, `docs`, and `doc-previews` containers (if needed), and uploads six global templates (Invoice, Receipt, Quotation variants). This gives users ready-made layouts they can apply immediately from the mobile app or API.
 
 ---
 
@@ -202,6 +208,10 @@ Docker: http://localhost:8000/api
 - `PUT /api/documents/{id}` - Update document (draft only)
 - `GET /api/documents` - List documents with filters (type, status, date range, search)
 - `POST /api/documents/{id}/sign` - Upload mobile signature + regenerate DOCX/PDF/preview
+
+#### Templates (`/api/templates`)
+- `GET /api/templates` - List all available templates (optionally filtered by document type)
+- `GET /api/templates/{id}` - Get template details by ID
 
 ### Authentication Endpoints
 
@@ -456,35 +466,173 @@ final response = await http.get(
 // Handle 401 errors by refreshing token or re-authenticating
 ```
 
-#### 4. Template-first + Signature Flow (mobile UX)
-1. **Create Document Screen**
-   - User taps “Create Document”.
-   - Present tabs for `Invoice | Receipt | Quotation`.
-   - Optional theme picker (color chips + font dropdown) → map to `theme` object.
-2. **Template Selection (optional)**
-   - If you maintain template IDs locally (or via future template endpoints), set `templateId` in the payload so the API applies business-approved colors/layout.
+#### 4. Fetch Available Templates
+```dart
+// Fetch all templates for a specific document type
+final token = await secureStorage.read(key: 'accessToken');
+final response = await http.get(
+  Uri.parse('$baseUrl/templates?type=Invoice'),
+  headers: {'Authorization': 'Bearer $token'},
+);
+
+final data = jsonDecode(response.body);
+if (data['success']) {
+  final templates = data['templates'] as List;
+  // Display templates in UI with preview images
+  for (var template in templates) {
+    print('Template: ${template['name']}');
+    print('Preview: ${template['previewUrl']}');
+    print('Theme: ${template['theme']}');
+  }
+}
+```
+
+#### 5. Create Document with Template Selection
+```dart
+// User selects a template from the list
+final selectedTemplateId = '1b351696-f113-4c58-a23a-3afbd27114de';
+
+// Create document using the selected template
+final token = await secureStorage.read(key: 'accessToken');
+final response = await http.post(
+  Uri.parse('$baseUrl/documents'),
+  headers: {
+    'Authorization': 'Bearer $token',
+    'Content-Type': 'application/json',
+  },
+  body: jsonEncode({
+    'businessId': businessId,
+    'type': 'Invoice',
+    'templateId': selectedTemplateId, // Use selected template
+    'customer': {
+      'name': 'John Doe',
+      'phone': '+254712345678',
+    },
+    'lines': [
+      {
+        'name': 'Product A',
+        'quantity': 2,
+        'unitPrice': 100.00,
+      },
+    ],
+    'currency': 'KES',
+  }),
+);
+
+final data = jsonDecode(response.body);
+if (data['success']) {
+  final docxUrl = data['urls']['docxUrl'];
+  final pdfUrl = data['urls']['pdfUrl'];
+  final previewUrl = data['urls']['previewUrl'];
+  // Display preview image in app
+}
+```
+
+#### 6. Create Document Without Template (From Scratch)
+```dart
+// Create document without template (uses default generation)
+final token = await secureStorage.read(key: 'accessToken');
+final response = await http.post(
+  Uri.parse('$baseUrl/documents'),
+  headers: {
+    'Authorization': 'Bearer $token',
+    'Content-Type': 'application/json',
+  },
+  body: jsonEncode({
+    'businessId': businessId,
+    'type': 'Invoice',
+    // No templateId - creates from scratch
+    'theme': {
+      // Optional: override default theme
+      'primaryColor': '#0F172A',
+      'secondaryColor': '#475569',
+      'accentColor': '#F97316',
+      'fontFamily': 'Poppins',
+    },
+    'customer': {
+      'name': 'John Doe',
+      'phone': '+254712345678',
+    },
+    'lines': [
+      {
+        'name': 'Product A',
+        'quantity': 2,
+        'unitPrice': 100.00,
+      },
+    ],
+    'currency': 'KES',
+  }),
+);
+```
+
+#### 7. Template-first + Signature Flow (Complete Mobile UX)
+1. **Template Selection Screen**
+   - Fetch templates: `GET /api/templates?type={Invoice|Receipt|Quotation}`
+   - Display template cards with preview images
+   - Show template name, theme colors, and "Use Template" button
+   - Option: "Create from Scratch" button
+
+2. **Create Document Screen**
+   - If template selected: Include `templateId` in request
+   - If from scratch: Optionally provide custom `theme` object
+   - User fills in customer and line items
+   - Submit: `POST /api/documents`
+
 3. **Preview & Confirmation**
-   - After hitting `POST /api/documents`, render the returned `urls.previewUrl` directly in the app (PNG now mirrors the final PDF, including colors + signature placeholders).
+   - Display `urls.previewUrl` (PNG) in app
+   - Preview matches final PDF layout including template styling
+
 4. **Signature Capture**
-   - Show a “Sign Document” CTA that opens a canvas (e.g., `SignatureController` or `scribble` package).
-   - Convert the drawing to PNG → `base64Encode`.
-   - Call `POST /api/documents/{id}/sign` with `signatureBase64` and `signerName`.
+   - Show "Sign Document" button
+   - Open signature canvas (e.g., `SignatureController` or `scribble` package)
+   - Convert drawing to PNG → `base64Encode`
+   - Call `POST /api/documents/{id}/sign`
+
 5. **Download / Share**
-   - Use `urls.pdfUrl` for sharing.
-   - Because the server re-generates the preview, you can refresh the preview in-app without re-creating the document.
+   - Use `urls.pdfUrl` for sharing
+   - Server regenerates preview after signing
 
 ```dart
-final signature = await controller.toPngBytes();
-final payload = {
-  'documentId': docId,
+// Complete flow: Template selection → Document creation → Signature
+// Step 1: Fetch templates
+final templatesResponse = await http.get(
+  Uri.parse('$baseUrl/templates?type=Invoice'),
+  headers: {'Authorization': 'Bearer $token'},
+);
+final templates = jsonDecode(templatesResponse.body)['templates'];
+
+// Step 2: User selects template (or chooses "from scratch")
+String? selectedTemplateId = userSelectedTemplate?.id;
+
+// Step 3: Create document
+final docPayload = {
+  'businessId': businessId,
+  'type': 'Invoice',
+  if (selectedTemplateId != null) 'templateId': selectedTemplateId,
+  'customer': {'name': customerName, 'phone': customerPhone},
+  'lines': lineItems,
+  'currency': 'KES',
+};
+final docResponse = await http.post(
+  Uri.parse('$baseUrl/documents'),
+  headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+  body: jsonEncode(docPayload),
+);
+final docData = jsonDecode(docResponse.body);
+final documentId = docData['documentId'];
+
+// Step 4: Capture signature
+final signature = await signatureController.toPngBytes();
+final signPayload = {
+  'documentId': documentId,
   'signerName': currentUser.name,
   'signatureBase64': base64Encode(signature!),
-  'notes': 'Signed on delivery'
+  'notes': 'Signed on delivery',
 };
 await http.post(
-  Uri.parse('$baseUrl/documents/$docId/sign'),
+  Uri.parse('$baseUrl/documents/$documentId/sign'),
   headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
-  body: jsonEncode(payload),
+  body: jsonEncode(signPayload),
 );
 ```
 
@@ -1145,6 +1293,18 @@ curl -X POST http://localhost:5052/api/documents \
   }'
 ```
 
+**Use a Seeded Template**
+
+1. List available templates seeded via the script:
+   ```bash
+   curl -X GET "http://localhost:5052/api/templates" \
+     -H "Authorization: Bearer {your-token}"
+   ```
+2. Pick the `id` for the template you want (e.g., “Modern Blue Invoice”).
+3. Pass it as `templateId` when creating or editing a document. The API will merge the DOCX template with your business data and regenerate DOCX/PDF/preview accordingly.
+
+This lets business owners start with polished layouts without designing templates themselves; the default set mirrors the six styles uploaded by `scripts/seed-templates.sh`.
+
 #### Step 4: Create Document from Voice
 
 **Invoice from Voice:**
@@ -1256,6 +1416,297 @@ curl -X POST http://localhost:5052/api/documents \
 ```
 
 Preview image now mirrors the QuestPDF layout (full header/table/signature styling), so the mobile app can display exactly what the PDF looks like.
+
+#### Step 10: List Available Templates
+```bash
+# List all templates
+curl -X GET "http://localhost:5052/api/templates" \
+  -H "Authorization: Bearer {your-token}"
+
+# Filter templates by document type (Invoice, Receipt, or Quotation)
+curl -X GET "http://localhost:5052/api/templates?type=Invoice" \
+  -H "Authorization: Bearer {your-token}"
+
+curl -X GET "http://localhost:5052/api/templates?type=Receipt" \
+  -H "Authorization: Bearer {your-token}"
+
+curl -X GET "http://localhost:5052/api/templates?type=Quotation" \
+  -H "Authorization: Bearer {your-token}"
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Found 6 template(s)",
+  "templates": [
+    {
+      "id": "1b351696-f113-4c58-a23a-3afbd27114de",
+      "type": "Invoice",
+      "name": "Modern Blue",
+      "version": 1,
+      "blobUrl": "global/Invoice/modern-blue-v1.docx",
+      "previewUrl": "https://biasharaos.blob.core.windows.net/doc-previews/1b351696-f113-4c58-a23a-3afbd27114de.png",
+      "theme": {
+        "primaryColor": "#1E40AF",
+        "secondaryColor": "#3B82F6",
+        "accentColor": "#60A5FA",
+        "fontFamily": "Inter"
+      },
+      "isDefault": true,
+      "createdAt": "2025-01-15T10:00:00Z"
+    },
+    {
+      "id": "3acba4d8-19af-4a7a-a41d-88488bb1676c",
+      "type": "Invoice",
+      "name": "Classic Green",
+      "version": 1,
+      "blobUrl": "global/Invoice/classic-green-v1.docx",
+      "previewUrl": "https://biasharaos.blob.core.windows.net/doc-previews/3acba4d8-19af-4a7a-a41d-88488bb1676c.png",
+      "theme": {
+        "primaryColor": "#065F46",
+        "secondaryColor": "#047857",
+        "accentColor": "#10B981",
+        "fontFamily": "Poppins"
+      },
+      "isDefault": false,
+      "createdAt": "2025-01-15T10:00:00Z"
+    }
+  ]
+}
+```
+
+#### Step 11: Get Template Details
+```bash
+curl -X GET "http://localhost:5052/api/templates/{template-id}" \
+  -H "Authorization: Bearer {your-token}"
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Template retrieved successfully",
+  "template": {
+    "id": "1b351696-f113-4c58-a23a-3afbd27114de",
+    "type": "Invoice",
+    "name": "Modern Blue",
+    "version": 1,
+    "blobUrl": "global/Invoice/modern-blue-v1.docx",
+    "previewUrl": "https://biasharaos.blob.core.windows.net/doc-previews/1b351696-f113-4c58-a23a-3afbd27114de.png",
+    "theme": {
+      "primaryColor": "#1E40AF",
+      "secondaryColor": "#3B82F6",
+      "accentColor": "#60A5FA",
+      "fontFamily": "Inter"
+    },
+    "isDefault": true,
+    "createdAt": "2025-01-15T10:00:00Z"
+  }
+}
+```
+
+#### Step 12: Create Document Using a Template
+```bash
+# Create invoice using a specific template
+curl -X POST http://localhost:5052/api/documents \
+  -H "Authorization: Bearer {your-token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "businessId": "{your-business-id}",
+    "type": "Invoice",
+    "templateId": "1b351696-f113-4c58-a23a-3afbd27114de",
+    "customer": {
+      "name": "John Doe",
+      "phone": "+254712345678"
+    },
+    "lines": [
+      {
+        "name": "Product A",
+        "quantity": 2,
+        "unitPrice": 100.00
+      }
+    ],
+    "currency": "KES"
+  }'
+```
+
+**Note**: When `templateId` is provided, the document will be generated using the template's layout and theme. You can still override the theme by providing a `theme` object in the request.
+
+#### Step 13: Create Document Without Template (From Scratch)
+```bash
+# Create invoice without template (uses default programmatic generation)
+curl -X POST http://localhost:5052/api/documents \
+  -H "Authorization: Bearer {your-token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "businessId": "{your-business-id}",
+    "type": "Invoice",
+    "customer": {
+      "name": "John Doe",
+      "phone": "+254712345678"
+    },
+    "lines": [
+      {
+        "name": "Product A",
+        "quantity": 2,
+        "unitPrice": 100.00
+      }
+    ],
+    "currency": "KES"
+  }'
+```
+
+**Note**: When `templateId` is omitted, the system uses programmatic document generation (OpenXmlDocumentGenerator) with default styling.
+
+### Templates API Endpoints
+
+#### 1. List Templates
+```http
+GET /api/templates?type={Invoice|Receipt|Quotation}
+Authorization: Bearer {jwt-token}
+```
+
+**Query Parameters:**
+- `type` (optional) - Filter by document type: `Invoice`, `Receipt`, or `Quotation`
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Found 6 template(s)",
+  "templates": [
+    {
+      "id": "template-uuid",
+      "type": "Invoice",
+      "name": "Modern Blue",
+      "version": 1,
+      "blobUrl": "global/Invoice/modern-blue-v1.docx",
+      "previewUrl": "https://biasharaos.blob.core.windows.net/doc-previews/template-uuid.png",
+      "theme": {
+        "primaryColor": "#1E40AF",
+        "secondaryColor": "#3B82F6",
+        "accentColor": "#60A5FA",
+        "fontFamily": "Inter"
+      },
+      "isDefault": true,
+      "createdAt": "2025-01-15T10:00:00Z"
+    }
+  ]
+}
+```
+
+#### 2. Get Template by ID
+```http
+GET /api/templates/{templateId}
+Authorization: Bearer {jwt-token}
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Template retrieved successfully",
+  "template": {
+    "id": "template-uuid",
+    "type": "Invoice",
+    "name": "Modern Blue",
+    "version": 1,
+    "blobUrl": "global/Invoice/modern-blue-v1.docx",
+    "previewUrl": "https://biasharaos.blob.core.windows.net/doc-previews/template-uuid.png",
+    "theme": {
+      "primaryColor": "#1E40AF",
+      "secondaryColor": "#3B82F6",
+      "accentColor": "#60A5FA",
+      "fontFamily": "Inter"
+    },
+    "isDefault": true,
+    "createdAt": "2025-01-15T10:00:00Z"
+  }
+}
+```
+
+### Using Templates When Creating Documents
+
+When creating documents, you have two options:
+
+1. **Use a Template** (Recommended for consistent branding):
+   - First, call `GET /api/templates` to see available templates
+   - Select a template that matches your document type
+   - Include the `templateId` in your document creation request
+   - The document will be generated using the template's layout and styling
+
+2. **Create From Scratch** (Custom styling):
+   - Omit the `templateId` field
+   - Optionally provide a custom `theme` object to override default colors/fonts
+   - The system uses programmatic generation with your custom theme
+
+**Example: Create Invoice with Template**
+```json
+{
+  "businessId": "business-uuid",
+  "type": "Invoice",
+  "templateId": "1b351696-f113-4c58-a23a-3afbd27114de",
+  "customer": {
+    "name": "John Doe",
+    "phone": "+254712345678"
+  },
+  "lines": [
+    {
+      "name": "Product A",
+      "quantity": 2,
+      "unitPrice": 100.00
+    }
+  ],
+  "currency": "KES"
+}
+```
+
+**Example: Create Invoice Without Template (Custom Theme)**
+```json
+{
+  "businessId": "business-uuid",
+  "type": "Invoice",
+  "theme": {
+    "primaryColor": "#0F172A",
+    "secondaryColor": "#475569",
+    "accentColor": "#F97316",
+    "fontFamily": "Poppins"
+  },
+  "customer": {
+    "name": "John Doe",
+    "phone": "+254712345678"
+  },
+  "lines": [
+    {
+      "name": "Product A",
+      "quantity": 2,
+      "unitPrice": 100.00
+    }
+  ],
+  "currency": "KES"
+}
+```
+
+**Example: Create Invoice Without Template (Default Styling)**
+```json
+{
+  "businessId": "business-uuid",
+  "type": "Invoice",
+  "customer": {
+    "name": "John Doe",
+    "phone": "+254712345678"
+  },
+  "lines": [
+    {
+      "name": "Product A",
+      "quantity": 2,
+      "unitPrice": 100.00
+    }
+  ],
+  "currency": "KES"
+}
+```
 
 ### How It Works
 

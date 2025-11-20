@@ -53,6 +53,9 @@ public static class DocumentServiceCollectionExtensions
         services.AddValidatorsFromAssemblyContaining<DocumentMappingProfile>();
 
         // ===== SERVICE REGISTRATION =====
+        services.AddScoped<ITemplateService, TemplateService>();
+        services.AddScoped<TemplateDocumentGenerator>();
+        services.AddScoped<TemplatePreviewGenerator>();
         services.AddScoped<IDocumentService, DocumentService>();
         services.AddSingleton<IVoiceIntentService, VoiceIntentService>();
 

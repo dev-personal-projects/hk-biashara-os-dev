@@ -137,6 +137,18 @@ public sealed class DocumentMappingProfile : Profile
             .ForMember(dest => dest.Document, opt => opt.Ignore());
 
         /// <summary>
+        /// Maps Template entity to TemplateDto.
+        /// Includes theme deserialization and blob URL construction.
+        /// </summary>
+        CreateMap<Template, TemplateDto>()
+            .ForMember(dest => dest.BlobUrl, opt => opt.MapFrom(src => src.BlobPath))
+            .ForMember(dest => dest.PreviewUrl, opt => opt.MapFrom(src => src.PreviewBlobUrl))
+            .ForMember(dest => dest.Theme, opt => opt.MapFrom(src =>
+                string.IsNullOrWhiteSpace(src.ThemeJson)
+                    ? null
+                    : DocumentTheme.FromJson(src.ThemeJson).ToDto()));
+
+        /// <summary>
         /// Maps UpdateDocumentRequest to TransactionalDocument entity.
         /// Only updates provided fields (partial update).
         /// </summary>
