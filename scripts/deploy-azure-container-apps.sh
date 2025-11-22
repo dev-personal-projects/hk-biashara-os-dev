@@ -57,6 +57,7 @@ validate_configuration() {
     "LOG_FOLDER"
     "PROJECT_RESOURCE_GROUP"
     "PROJECT_SUBSCRIPTION_ID"
+    "ACR_NAME"
   )
   for var in "${required_vars[@]}"; do
     if [[ -z "${!var:-}" ]]; then
@@ -137,6 +138,8 @@ provision_infra_bicep() {
   local bicep_dir="${project_root}/bicep"
   local template_file="${bicep_dir}/main.bicep"
   local params_file="${bicep_dir}/parameters.${ENVIRONMENT_PREFIX}.json"
+  local repo_url="${REPOSITORY_URL:-https://github.com/dev-personal-projects/hk-biashara-os-dev}"
+  local branch="${GIT_BRANCH:-dev}"
 
   if [[ ! -f "$template_file" ]]; then
     log_error "Bicep template not found at: $template_file"
@@ -259,7 +262,7 @@ prepare_container_apps_environment() {
   fi
   
   local container_app_name="${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}-worker"
-  local registry_url="${ENVIRONMENT_PREFIX}${PROJECT_PREFIX}contregistry.azurecr.io"
+  local registry_url="${ACR_NAME}.azurecr.io"
 
   log_info "Deployment Targets:"
   if [[ -n "$environment_name" ]]; then

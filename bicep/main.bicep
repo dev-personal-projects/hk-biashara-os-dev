@@ -117,6 +117,7 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
             cpu: json(cpu)
             memory: memory
           }
+
           env: concat([
             {
               name: 'ASPNETCORE_ENVIRONMENT'
@@ -136,8 +137,6 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
               value: keyVaultName
             }
           ] : [])
-        }
-      ]
       scale: {
         minReplicas: scaleMin
         maxReplicas: scaleMax
