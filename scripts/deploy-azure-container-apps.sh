@@ -144,23 +144,21 @@ provision_infra_bicep() {
   fi
 
   log_info "Deploying infrastructure via Bicep (template: $template_file)"
+  local deploy_result=0
+  local deploy_output=""
+  
   if [[ -f "$params_file" ]]; then
     log_info "Using parameters file: $params_file"
     log_info "Provisioning resources (this may take 1-2 minutes)..."
-    if az deployment group create \
+    deploy_output=$(az deployment group create \
       --resource-group "$PROJECT_RESOURCE_GROUP" \
       --template-file "$template_file" \
       --parameters @"$params_file" \
-      --output none 2>&1 | grep -v "^INFO:" | grep -v "^WARNING:" || true; then
-      log_success "Bicep deployment completed successfully"
-    else
-      log_error "Bicep deployment failed"
-      return 1
-    fi
+      --output none 2>&1) || deploy_result=$?
   else
     log_warning "Parameters file not found at ${params_file}. Using inline parameters."
     log_info "Provisioning resources (this may take 1-2 minutes)..."
-    if az deployment group create \
+    deploy_output=$(az deployment group create \
       --resource-group "$PROJECT_RESOURCE_GROUP" \
       --template-file "$template_file" \
       --parameters environment="$ENVIRONMENT_PREFIX" \
@@ -171,12 +169,22 @@ provision_infra_bicep() {
                    memory="0.5Gi" \
                    scaleMin=1 \
                    scaleMax=10 \
-      --output none 2>&1 | grep -v "^INFO:" | grep -v "^WARNING:" || true; then
-      log_success "Bicep deployment completed successfully"
-    else
-      log_error "Bicep deployment failed"
-      return 1
+      --output none 2>&1) || deploy_result=$?
+  fi
+  
+  # Filter out verbose messages but keep errors
+  local filtered_deploy_output
+  filtered_deploy_output=$(echo "$deploy_output" | grep -v "^INFO:" | grep -v "^WARNING:" || true)
+  
+  if [[ $deploy_result -eq 0 ]]; then
+    log_success "Bicep deployment completed successfully"
+  else
+    log_error "Bicep deployment failed (exit code: $deploy_result)"
+    if [[ -n "$filtered_deploy_output" ]]; then
+      log_error "Deployment error details:"
+      echo "$filtered_deploy_output" | grep -iE "error|failed|exception" | head -10 | sed 's/^/  /'
     fi
+    return 1
   fi
 }
 
@@ -210,32 +218,55 @@ prepare_container_registry() {
   fi
 }
 
+# ----- Get Container Apps Environment Name from Bicep -----
+get_container_apps_environment_name() {
+  # Bicep creates environments with pattern: env-${environment}-${uniqueSuffix}
+  # We need to query for the environment created by Bicep
+  local env_pattern="env-${ENVIRONMENT_PREFIX}-"
+  
+  log_step "Finding Container Apps Environment created by Bicep..." >&2
+  
+  # Query for environments matching the Bicep pattern
+  # Redirect stderr to avoid capturing log messages in the output
+  local env_name
+  env_name=$(az containerapp env list \
+    --resource-group "$PROJECT_RESOURCE_GROUP" \
+    --query "[?starts_with(name, '${env_pattern}')].name" -o tsv 2>/dev/null | head -1)
+  
+  if [[ -n "$env_name" ]]; then
+    log_info "Found Container Apps Environment: $env_name" >&2
+    # Output only the environment name to stdout (for capture)
+    echo "$env_name"
+    return 0
+  else
+    log_warning "Container Apps Environment matching pattern '${env_pattern}*' not found." >&2
+    log_info "This is expected if Bicep deployment just completed - environment may still be provisioning." >&2
+    log_info "The environment will be created by Bicep or az containerapp up will handle it." >&2
+    return 1
+  fi
+}
+
 # ----- Prepare Container Apps Environment -----
 prepare_container_apps_environment() {
-  local environment_name="${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}-BackendContainerAppsEnv-dev"
+  # Try to get environment name from Bicep deployment
+  local environment_name
+  environment_name=$(get_container_apps_environment_name) || environment_name=""
+  
+  # If not found, log that Bicep will create it or az containerapp up will handle it
+  if [[ -z "$environment_name" ]]; then
+    log_info "Container Apps Environment will be managed by Bicep or az containerapp up"
+    log_info "No manual environment preparation needed"
+  fi
+  
   local container_app_name="${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}-worker"
   local registry_url="${ENVIRONMENT_PREFIX}${PROJECT_PREFIX}contregistry.azurecr.io"
 
-  log_step "Preparing Container Apps Environment: $environment_name"
-
-  if ! az containerapp env show --name "$environment_name" --resource-group "$PROJECT_RESOURCE_GROUP" --output none &>/dev/null; then
-    log_warning "Container Apps Environment does not exist. Creating..."
-    log_info "This may take 2-3 minutes..."
-    if az containerapp env create \
-      --name "$environment_name" \
-      --resource-group "$PROJECT_RESOURCE_GROUP" \
-      --location "$PROJECT_LOCATION" \
-      --output none 2>/dev/null; then
-      log_success "Container Apps Environment created"
-    else
-      log_warning "Environment creation may have failed, but continuing..."
-    fi
-  else
-    log_info "Container Apps Environment exists: $environment_name"
-  fi
-
   log_info "Deployment Targets:"
-  log_info "  Environment: $environment_name"
+  if [[ -n "$environment_name" ]]; then
+    log_info "  Environment: $environment_name"
+  else
+    log_info "  Environment: (will be created/identified during deployment)"
+  fi
   log_info "  Container App: $container_app_name"
   log_info "  Registry: $registry_url"
 }
@@ -261,19 +292,32 @@ create_or_get_service_principal() {
       temp_file=$(mktemp)
       local reset_output
       
-      if reset_output=$(az ad sp credential reset --id "$SERVICE_PRINCIPAL_CLIENT_ID" --output json 2>&1); then
-        echo "$reset_output" > "$temp_file"
-        
-        # Extract the new password/secret
-        if command -v jq &> /dev/null; then
-          SERVICE_PRINCIPAL_CLIENT_SECRET=$(jq -r '.password' "$temp_file")
+      # Reset credentials - capture stderr separately to avoid mixing with JSON
+      local reset_stderr
+      reset_stderr=$(mktemp)
+      if reset_output=$(az ad sp credential reset --id "$SERVICE_PRINCIPAL_CLIENT_ID" --output json 2>"$reset_stderr"); then
+        # Check if output is valid JSON (starts with {)
+        if [[ "$reset_output" =~ ^\{ ]]; then
+          echo "$reset_output" > "$temp_file"
+          
+          # Extract the new password/secret
+          if command -v jq &> /dev/null; then
+            SERVICE_PRINCIPAL_CLIENT_SECRET=$(jq -r '.password // empty' "$temp_file" 2>/dev/null)
+          else
+            # Fallback: use sed for basic JSON parsing
+            SERVICE_PRINCIPAL_CLIENT_SECRET=$(sed -n 's/.*"password"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$temp_file" 2>/dev/null)
+          fi
         else
-          SERVICE_PRINCIPAL_CLIENT_SECRET=$(sed -n 's/.*"password"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$temp_file")
+          log_warning "Service principal reset output is not valid JSON. Output: ${reset_output:0:100}"
+          # Try to extract from stderr or use Azure CLI query
+          if [[ -s "$reset_stderr" ]]; then
+            log_warning "Error details: $(cat "$reset_stderr")"
+          fi
         fi
         
-        rm -f "$temp_file"
+        rm -f "$temp_file" "$reset_stderr"
         
-        if [[ -n "$SERVICE_PRINCIPAL_CLIENT_SECRET" ]]; then
+        if [[ -n "$SERVICE_PRINCIPAL_CLIENT_SECRET" ]] && [[ "$SERVICE_PRINCIPAL_CLIENT_SECRET" != "null" ]]; then
           log_success "Service Principal credentials reset successfully"
           log_info "New secret has been generated and will be used for this deployment"
           
@@ -298,12 +342,17 @@ create_or_get_service_principal() {
             log_info "  AZURE_TENANT_ID: $SERVICE_PRINCIPAL_TENANT_ID"
           fi
         else
-          log_warning "Failed to extract new secret from reset output. Will use ACR admin credentials as fallback."
+          log_warning "Failed to extract new secret from reset output."
+          log_info "The script will attempt to use ACR admin credentials as fallback."
           SERVICE_PRINCIPAL_CLIENT_SECRET=""
         fi
       else
-        log_warning "Failed to reset Service Principal credentials: $reset_output"
-        log_info "The script will attempt to use ACR admin credentials as fallback"
+        log_warning "Failed to reset Service Principal credentials."
+        if [[ -s "$reset_stderr" ]]; then
+          log_warning "Error: $(cat "$reset_stderr")"
+        fi
+        rm -f "$temp_file" "$reset_stderr"
+        log_info "The script will attempt to use ACR admin credentials as fallback."
         SERVICE_PRINCIPAL_CLIENT_SECRET=""
       fi
     else
@@ -396,7 +445,20 @@ create_or_get_service_principal() {
 # ----- Build & Deploy Container App -----
 deploy_container_app() {
   log_step "Deploying Container App..."
-  local environment_name="${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}-BackendContainerAppsEnv-dev"
+  
+  # Get the environment name created by Bicep (pattern: env-${environment}-${uniqueSuffix})
+  # Capture only stdout (environment name), redirect stderr (log messages) to /dev/null
+  local environment_name
+  environment_name=$(get_container_apps_environment_name 2>/dev/null) || {
+    log_warning "Could not find Container Apps Environment from Bicep deployment."
+    log_info "az containerapp up will create or use the appropriate environment."
+    # Set to empty - az containerapp up will handle environment selection
+    environment_name=""
+  }
+  
+  # Clean up environment name (remove any whitespace or newlines)
+  environment_name=$(echo "$environment_name" | tr -d '\n\r' | xargs)
+  
   local container_app_name="${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}-worker"
   local registry_url="${ENVIRONMENT_PREFIX}${PROJECT_PREFIX}contregistry.azurecr.io"
   local repo_url="${REPOSITORY_URL}"
@@ -499,13 +561,20 @@ deploy_container_app() {
   local up_args=(
     --name "$container_app_name"
     --resource-group "$PROJECT_RESOURCE_GROUP"
-    --environment "$environment_name"
     --repo "$repo_url"
     --branch "$branch"
     --registry-server "$registry_url"
     --ingress external
     --target-port "$target_port"
   )
+  
+  # Only add --environment if we found it, otherwise let az containerapp up handle it
+  if [[ -n "$environment_name" ]]; then
+    up_args+=(--environment "$environment_name")
+    log_info "Using Container Apps Environment: $environment_name"
+  else
+    log_info "az containerapp up will create or select the appropriate environment"
+  fi
   
   # Add authentication credentials
   if [[ "$use_acr_admin" == true ]]; then
