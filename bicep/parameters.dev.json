@@ -15,16 +15,22 @@
       "value": "East US"
     },
     "cpu": {
-      "value": "0.5"
+      "value": "0.25"
     },
     "memory": {
-      "value": "1.0Gi"
+      "value": "0.5Gi"
     },
     "scaleMin": {
       "value": 1
     },
     "scaleMax": {
-      "value": 3
+      "value": 10
+    },
+    "targetPort": {
+      "value": 8080
+    },
+    "keyVaultName": {
+      "value": ""
     }
   }
 }

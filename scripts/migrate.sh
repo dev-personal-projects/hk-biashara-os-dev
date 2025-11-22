@@ -13,19 +13,24 @@ EF_TOOL="/root/.dotnet/tools/dotnet-ef"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Helper functions
 log_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
+    echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] [INFO]${NC} $1"
 }
 
 log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
+    echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] [WARNING]${NC} $1"
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')] [ERROR]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] [SUCCESS]${NC} $1"
 }
 
 # Check if EF tools are installed
@@ -55,19 +60,19 @@ case "$1" in
         fi
         log_info "Creating migration: $2"
         $EF_TOOL migrations add "$2"
-        log_info "Migration '$2' created successfully"
+        log_success "Migration '$2' created successfully"
         ;;
     
     "update")
         log_info "Applying migrations to database..."
         $EF_TOOL database update
-        log_info "Database updated successfully"
+        log_success "Database updated successfully"
         ;;
     
     "remove")
         log_info "Removing last migration..."
         $EF_TOOL migrations remove
-        log_info "Last migration removed successfully"
+        log_success "Last migration removed successfully"
         ;;
     
     "list")
@@ -93,7 +98,7 @@ case "$1" in
             $EF_TOOL database drop --force
             log_info "Applying all migrations..."
             $EF_TOOL database update
-            log_info "Database recreated successfully"
+            log_success "Database recreated successfully"
         else
             log_info "Operation cancelled"
         fi

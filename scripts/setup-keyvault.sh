@@ -9,11 +9,14 @@ set -euo pipefail
 declare -r RED='\033[0;31m'
 declare -r GREEN='\033[0;32m'
 declare -r BLUE='\033[0;34m'
+declare -r YELLOW='\033[0;33m'
 declare -r NC='\033[0m'
 
-log_error()   { echo -e "${RED}[ERROR] $*${NC}" >&2; }
-log_info()    { echo -e "${BLUE}[INFO] $*${NC}"; }
-log_success() { echo -e "${GREEN}[SUCCESS] $*${NC}"; }
+log_error()   { echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')] [ERROR] $*${NC}" >&2; }
+log_info()    { echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] [INFO] $*${NC}"; }
+log_success() { echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] [SUCCESS] $*${NC}"; }
+log_warning() { echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] [WARNING] $*${NC}"; }
+log_step()    { echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] [STEP] $*${NC}"; }
 
 # ----- Load Configuration -----
 initialize_configuration() {
@@ -114,14 +117,18 @@ grant_container_app_access() {
 
 # ----- Main -----
 main() {
+  log_info "=========================================="
+  log_info "Azure Key Vault Setup Script"
+  log_info "=========================================="
+  
   initialize_configuration
   
-  log_info "Starting Key Vault Setup"
+  log_step "Starting Key Vault Setup"
   
   # Provision Key Vault
   local keyvault_name="${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}-kv"
   
-  log_info "Checking if Key Vault exists: $keyvault_name"
+  log_step "Checking if Key Vault exists: $keyvault_name"
   if az keyvault show --name "$keyvault_name" --resource-group "$PROJECT_RESOURCE_GROUP" &>/dev/null; then
     log_info "Key Vault already exists: $keyvault_name"
   else
@@ -137,7 +144,7 @@ main() {
     log_success "Key Vault created: $keyvault_name"
   fi
   
-  log_info "Uploading secrets to Key Vault: $keyvault_name"
+  log_step "Uploading secrets to Key Vault: $keyvault_name"
   
   # Upload all secrets
   upload_secrets "$keyvault_name"
@@ -145,7 +152,9 @@ main() {
   # Grant Container App access (if exists)
   grant_container_app_access "$keyvault_name"
   
-  log_success "Key Vault setup completed successfully"
+  log_info "=========================================="
+  log_success "Key Vault setup completed successfully!"
+  log_info "=========================================="
   log_info "Key Vault Name: $keyvault_name"
   log_info "Key Vault URI: https://${keyvault_name}.vault.azure.net/"
 }

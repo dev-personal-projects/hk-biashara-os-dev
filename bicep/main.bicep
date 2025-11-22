@@ -27,11 +27,20 @@ param scaleMin int = 1
 @description('Maximum autoscale replicas')
 param scaleMax int = 3
 
+@description('Target port for the container app (default: 8080)')
+param targetPort int = 8080
+
+@description('Key Vault name (optional)')
+param keyVaultName string = ''
+
 // Generate unique names based on resource group for better isolation
 var uniqueSuffix = uniqueString(resourceGroup().id)
 var appName = 'app-${environment}-${uniqueSuffix}'
 var acrName = 'acr${uniqueSuffix}'
 var containerAppEnvName = 'env-${environment}-${uniqueSuffix}'
+
+// Environment-specific ASP.NET Core environment variable
+var aspnetcoreEnvironment = environment == 'prod' ? 'Production' : (environment == 'staging' ? 'Staging' : 'Development')
 
 // Common tags for all resources
 var commonTags = {
@@ -74,8 +83,9 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
     configuration: {
       ingress: {
         external: true
-        targetPort: 8080
+        targetPort: targetPort
         allowInsecure: false
+        transport: 'auto'
         traffic: [
           {
             weight: 100
@@ -107,6 +117,25 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
             cpu: json(cpu)
             memory: memory
           }
+          env: concat([
+            {
+              name: 'ASPNETCORE_ENVIRONMENT'
+              value: aspnetcoreEnvironment
+            }
+            {
+              name: 'ASPNETCORE_HTTP_PORTS'
+              value: string(targetPort)
+            }
+            {
+              name: 'ASPNETCORE_URLS'
+              value: 'http://+:${targetPort}'
+            }
+          ], !empty(keyVaultName) ? [
+            {
+              name: 'KeyVaultName'
+              value: keyVaultName
+            }
+          ] : [])
         }
       ]
       scale: {
