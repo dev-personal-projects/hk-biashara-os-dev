@@ -463,7 +463,8 @@ deploy_container_app() {
   local registry_url="${ENVIRONMENT_PREFIX}${PROJECT_PREFIX}contregistry.azurecr.io"
   local repo_url="${REPOSITORY_URL}"
   local branch="${GIT_BRANCH}"
-  local keyvault_name="${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}-kv"
+  # Key Vault name - can be overridden by KEY_VAULT_NAME environment variable
+  local keyvault_name="${KEY_VAULT_NAME:-${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}-kv}"
   local target_port="${TARGET_PORT}"
   
   # Get service principal credentials from config or create new
@@ -735,24 +736,73 @@ deploy_container_app() {
   fi
 
   log_step "Granting Container App access to Key Vault..."
+  
+  # Try to find Key Vault - first try exact name, then try pattern matching
+  local actual_keyvault_name="$keyvault_name"
+  if ! az keyvault show --name "$keyvault_name" --resource-group "$PROJECT_RESOURCE_GROUP" --output none &>/dev/null; then
+    log_info "Key Vault '$keyvault_name' not found. Searching for Key Vaults matching pattern..."
+    
+    # Try to find Key Vault with similar name pattern (e.g., dev-bos-kv, dev-bs-kv)
+    local kv_pattern="${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}*-kv"
+    local found_kv
+    found_kv=$(az keyvault list \
+      --resource-group "$PROJECT_RESOURCE_GROUP" \
+      --query "[?contains(name, '${ENVIRONMENT_PREFIX}') && contains(name, 'kv')].name" -o tsv 2>/dev/null | head -1)
+    
+    if [[ -n "$found_kv" ]]; then
+      actual_keyvault_name="$found_kv"
+      log_info "Found existing Key Vault: $actual_keyvault_name"
+      log_info "Using this Key Vault for access grant."
+    else
+      log_warning "No Key Vault found matching pattern '$kv_pattern' in resource group '$PROJECT_RESOURCE_GROUP'."
+      log_info "Key Vault '$keyvault_name' does not exist yet."
+      log_info "Run './scripts/setup-keyvault.sh' to create it and upload secrets."
+      log_info "After creating the Key Vault, you can rerun this deployment script to grant access."
+      return 0
+    fi
+  else
+    log_info "Found Key Vault: $actual_keyvault_name"
+  fi
+  
+  # Get Container App's managed identity principal ID
   local principal_id
   principal_id=$(az containerapp show \
     --name "$container_app_name" \
     --resource-group "$PROJECT_RESOURCE_GROUP" \
     --query "identity.principalId" -o tsv 2>/dev/null)
   
-  if [[ -n "$principal_id" ]]; then
-    if az keyvault set-policy \
-      --name "$keyvault_name" \
-      --object-id "$principal_id" \
-      --secret-permissions get list \
-      --output none 2>/dev/null; then
-      log_success "Key Vault access granted to Container App"
-    else
-      log_warning "Key Vault may not exist or access grant failed (this is OK if Key Vault doesn't exist yet)"
-    fi
+  if [[ -z "$principal_id" ]]; then
+    log_warning "Could not retrieve principal ID for Container App managed identity."
+    log_warning "Managed identity may not be enabled yet. This will be retried on next deployment."
+    return 0
+  fi
+  
+  log_info "Container App Principal ID: $principal_id"
+  log_info "Granting 'get' and 'list' permissions on secrets..."
+  
+  # Grant access to Key Vault
+  if az keyvault set-policy \
+    --name "$actual_keyvault_name" \
+    --object-id "$principal_id" \
+    --secret-permissions get list \
+    --output none 2>/dev/null; then
+    log_success "Key Vault access granted to Container App"
+    log_info "Container App '$container_app_name' can now read secrets from Key Vault: $actual_keyvault_name"
   else
-    log_warning "Could not retrieve principal ID for Key Vault access grant"
+    log_error "Failed to grant Key Vault access. This may be due to insufficient permissions."
+    log_info "You may need to grant access manually using one of these methods:"
+    log_info ""
+    log_info "Option 1: Using Azure CLI:"
+    log_info "  az keyvault set-policy \\"
+    log_info "    --name $actual_keyvault_name \\"
+    log_info "    --object-id $principal_id \\"
+    log_info "    --secret-permissions get list"
+    log_info ""
+    log_info "Option 2: Using Azure Portal:"
+    log_info "  1. Go to Key Vault: $actual_keyvault_name"
+    log_info "  2. Navigate to 'Access policies' or 'Access control (IAM)'"
+    log_info "  3. Add the Container App's managed identity with 'Get' and 'List' permissions on secrets"
+    return 1
   fi
   
   # Get and display the app URL

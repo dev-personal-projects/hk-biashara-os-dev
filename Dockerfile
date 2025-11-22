@@ -26,11 +26,12 @@ RUN apt-get update && apt-get install -y \
 # Copy the published app
 COPY --from=build /app/out .
 
-# Expose port
-EXPOSE 8000
+# Expose port (default to 8080, can be overridden by environment variables)
+EXPOSE 8080
 
 # Set environment variables
-ENV ASPNETCORE_URLS=http://+:8000
+# Note: These can be overridden by Azure Container Apps environment variables
+ENV ASPNETCORE_URLS=http://+:8080
 ENV ASPNETCORE_ENVIRONMENT=Production
 
 # Run the application
