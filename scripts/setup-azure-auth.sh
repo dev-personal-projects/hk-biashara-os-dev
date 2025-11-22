@@ -8,14 +8,19 @@ set -e
 # Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 log_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
+    echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] [INFO]${NC} $1"
 }
 
 log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
+    echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] [WARNING]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] [SUCCESS]${NC} $1"
 }
 
 log_info "Setting up Azure CLI authentication..."
@@ -43,5 +48,5 @@ if [[ "$response" =~ ^[Yy]$ ]]; then
     log_info "Default subscription set to: $subscription_id"
 fi
 
-log_info "Azure authentication setup complete!"
+log_success "Azure authentication setup complete!"
 log_info "You can now run migrations with: ./migrate.sh update"

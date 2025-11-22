@@ -25,6 +25,12 @@
     },
     "scaleMax": {
       "value": 10
+    },
+    "targetPort": {
+      "value": 8080
+    },
+    "keyVaultName": {
+      "value": ""
     }
   }
 }

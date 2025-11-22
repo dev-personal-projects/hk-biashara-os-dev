@@ -9,11 +9,14 @@ set -euo pipefail
 declare -r RED='\033[0;31m'
 declare -r GREEN='\033[0;32m'
 declare -r BLUE='\033[0;34m'
+declare -r YELLOW='\033[0;33m'
 declare -r NC='\033[0m'
 
-log_error()   { echo -e "${RED}[ERROR] $*${NC}" >&2; }
-log_info()    { echo -e "${BLUE}[INFO] $*${NC}"; }
-log_success() { echo -e "${GREEN}[SUCCESS] $*${NC}"; }
+log_error()   { echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')] [ERROR] $*${NC}" >&2; }
+log_info()    { echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] [INFO] $*${NC}"; }
+log_success() { echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] [SUCCESS] $*${NC}"; }
+log_warning() { echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] [WARNING] $*${NC}"; }
+log_step()    { echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] [STEP] $*${NC}"; }
 
 # ----- Load Configuration -----
 initialize_configuration() {
@@ -34,53 +37,90 @@ initialize_configuration() {
   exit 1
 }
 
+# ----- Validate Required Secrets -----
+validate_secrets() {
+  local missing_secrets=()
+  
+  # Required secrets
+  [[ -z "${DB_CONNECTION_STRING:-}" ]] && missing_secrets+=("DB_CONNECTION_STRING")
+  [[ -z "${BLOB_STORAGE_CONNECTION_STRING:-}" ]] && missing_secrets+=("BLOB_STORAGE_CONNECTION_STRING")
+  [[ -z "${JWT_SECRET_KEY:-}" ]] && missing_secrets+=("JWT_SECRET_KEY")
+  
+  if [[ ${#missing_secrets[@]} -gt 0 ]]; then
+    log_error "Missing required environment variables:"
+    for secret in "${missing_secrets[@]}"; do
+      log_error "  - $secret"
+    done
+    log_error ""
+    log_error "Please set these environment variables before running the script."
+    log_error "Example:"
+    log_error "  export DB_CONNECTION_STRING='Server=tcp:...'"
+    log_error "  export BLOB_STORAGE_CONNECTION_STRING='DefaultEndpointsProtocol=https;...'"
+    log_error "  export JWT_SECRET_KEY='your-secret-key'"
+    return 1
+  fi
+  
+  return 0
+}
+
+# ----- Upload Secret Helper -----
+upload_secret() {
+  local keyvault_name=$1
+  local secret_name=$2
+  local secret_value=$3
+  local tmpfile
+  
+  if [[ -z "$secret_value" ]]; then
+    log_warning "Skipping secret '$secret_name' (not provided)"
+    return 0
+  fi
+  
+  tmpfile=$(mktemp)
+  echo -n "$secret_value" > "$tmpfile"
+  
+  if az keyvault secret set \
+    --vault-name "$keyvault_name" \
+    --name "$secret_name" \
+    --file "$tmpfile" \
+    --output none 2>/dev/null; then
+    log_info "  ✓ Uploaded: $secret_name"
+  else
+    log_error "  ✗ Failed to upload: $secret_name"
+    rm -f "$tmpfile"
+    return 1
+  fi
+  
+  rm -f "$tmpfile"
+  return 0
+}
+
 # ----- Upload Secrets to Key Vault -----
 upload_secrets() {
   local keyvault_name=$1
-  local tmpfile=$(mktemp)
   
-  # Connection Strings
-  echo -n 'Server=tcp:biashara-os-server-name.database.windows.net,1433;Initial Catalog=biasharaos-db;Persist Security Info=False;User ID=biashara-os-server-name;Password=Munene@04m;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;' > "$tmpfile"
-  az keyvault secret set --vault-name "$keyvault_name" --name "ConnectionStrings--Default" --file "$tmpfile" --output none
+  log_info "Uploading secrets to Key Vault..."
   
-  echo -n 'DefaultEndpointsProtocol=https;AccountName=biasharaos;AccountKey=FpuEloIliwJrI3NrIl6jan6GxW+jVejUuiaPuOF9UkrwuGEueIkMM85FePBJleuT9woLeQMDTi4b+AStvvHwbw==;EndpointSuffix=core.windows.net' > "$tmpfile"
-  az keyvault secret set --vault-name "$keyvault_name" --name "ConnectionStrings--BlobStorage" --file "$tmpfile" --output none
+  # Validate required secrets
+  if ! validate_secrets; then
+    return 1
+  fi
   
-  # Cosmos DB
-  echo -n 'https://biasharaops-accout.documents.azure.com:443/' > "$tmpfile"
-  az keyvault secret set --vault-name "$keyvault_name" --name "Cosmos--Endpoint" --file "$tmpfile" --output none
+  # Required secrets
+  upload_secret "$keyvault_name" "ConnectionStrings--Default" "${DB_CONNECTION_STRING}"
+  upload_secret "$keyvault_name" "ConnectionStrings--BlobStorage" "${BLOB_STORAGE_CONNECTION_STRING}"
+  upload_secret "$keyvault_name" "Auth--Jwt--SecretKey" "${JWT_SECRET_KEY}"
   
-  echo -n 'Apa97fA0OheDOKdR1OV4W9isKrU7kWZnubALKC6dY02HfWjldBImuVzotu3InflUdVi6Oq147uOUACDbiJO24w==' > "$tmpfile"
-  az keyvault secret set --vault-name "$keyvault_name" --name "Cosmos--Key" --file "$tmpfile" --output none
+  # Optional secrets (only upload if provided)
+  upload_secret "$keyvault_name" "Cosmos--Endpoint" "${COSMOS_ENDPOINT:-}"
+  upload_secret "$keyvault_name" "Cosmos--Key" "${COSMOS_KEY:-}"
+  upload_secret "$keyvault_name" "Auth--Supabase--Url" "${SUPABASE_URL:-}"
+  upload_secret "$keyvault_name" "Auth--Supabase--Key" "${SUPABASE_KEY:-}"
+  upload_secret "$keyvault_name" "Speech--Key" "${SPEECH_KEY:-}"
+  upload_secret "$keyvault_name" "Voice--Key" "${VOICE_KEY:-}"
+  upload_secret "$keyvault_name" "AzureOpenAI--ApiKey" "${AZURE_OPENAI_API_KEY:-}"
+  upload_secret "$keyvault_name" "Share--WhatsApp--AccessToken" "${WHATSAPP_ACCESS_TOKEN:-}"
   
-  # Supabase Auth
-  echo -n 'https://pqsnqrovyidkpcfmfwec.supabase.co' > "$tmpfile"
-  az keyvault secret set --vault-name "$keyvault_name" --name "Auth--Supabase--Url" --file "$tmpfile" --output none
-  
-  echo -n 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBxc25xcm92eWlka3BjZm1md2VjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE0NjEzNTMsImV4cCI6MjA3NzAzNzM1M30.Dc34BqSGaIUck6LwY_fXCn0AfIohEuMZqHmjSvH7lrw' > "$tmpfile"
-  az keyvault secret set --vault-name "$keyvault_name" --name "Auth--Supabase--Key" --file "$tmpfile" --output none
-  
-  # JWT Secret
-  echo -n 'ZiWI5kVr3qmnEppSfAoKBUgeNbbg6diSfA/dpKB2vOdnKh1vQl6UQ/OK/6m2qaAe5Rgejrzn0KsPt5XmyDyU3g==' > "$tmpfile"
-  az keyvault secret set --vault-name "$keyvault_name" --name "Auth--Jwt--SecretKey" --file "$tmpfile" --output none
-  
-  # Azure Speech
-  echo -n 'nWY5WZsOKi68uZDdiZsTO7HXfXCXropGlW3p2WFmFrBITiM6qVa4JQQJ99BKACi5YpzXJ3w3AAAYACOGi57R' > "$tmpfile"
-  az keyvault secret set --vault-name "$keyvault_name" --name "Speech--Key" --file "$tmpfile" --output none
-  
-  echo -n 'nWY5WZsOKi68uZDdiZsTO7HXfXCXropGlW3p2WFmFrBITiM6qVa4JQQJ99BKACi5YpzXJ3w3AAAYACOGi57R' > "$tmpfile"
-  az keyvault secret set --vault-name "$keyvault_name" --name "Voice--Key" --file "$tmpfile" --output none
-  
-  # Azure OpenAI
-  echo -n 'your-aoai-key' > "$tmpfile"
-  az keyvault secret set --vault-name "$keyvault_name" --name "AzureOpenAI--ApiKey" --file "$tmpfile" --output none
-  
-  # WhatsApp
-  echo -n 'meta-access-token' > "$tmpfile"
-  az keyvault secret set --vault-name "$keyvault_name" --name "Share--WhatsApp--AccessToken" --file "$tmpfile" --output none
-  
-  rm -f "$tmpfile"
-  log_success "All secrets uploaded to Key Vault"
+  log_success "Secrets uploaded to Key Vault"
 }
 
 # ----- Grant Container App Access to Key Vault -----
@@ -114,14 +154,18 @@ grant_container_app_access() {
 
 # ----- Main -----
 main() {
+  log_info "=========================================="
+  log_info "Azure Key Vault Setup Script"
+  log_info "=========================================="
+  
   initialize_configuration
   
-  log_info "Starting Key Vault Setup"
+  log_step "Starting Key Vault Setup"
   
   # Provision Key Vault
   local keyvault_name="${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}-kv"
   
-  log_info "Checking if Key Vault exists: $keyvault_name"
+  log_step "Checking if Key Vault exists: $keyvault_name"
   if az keyvault show --name "$keyvault_name" --resource-group "$PROJECT_RESOURCE_GROUP" &>/dev/null; then
     log_info "Key Vault already exists: $keyvault_name"
   else
@@ -137,7 +181,23 @@ main() {
     log_success "Key Vault created: $keyvault_name"
   fi
   
-  log_info "Uploading secrets to Key Vault: $keyvault_name"
+  log_step "Uploading secrets to Key Vault: $keyvault_name"
+  log_info ""
+  log_info "Required environment variables:"
+  log_info "  - DB_CONNECTION_STRING: SQL Database connection string"
+  log_info "  - BLOB_STORAGE_CONNECTION_STRING: Azure Blob Storage connection string"
+  log_info "  - JWT_SECRET_KEY: JWT signing secret key"
+  log_info ""
+  log_info "Optional environment variables:"
+  log_info "  - COSMOS_ENDPOINT: Cosmos DB endpoint URL"
+  log_info "  - COSMOS_KEY: Cosmos DB access key"
+  log_info "  - SUPABASE_URL: Supabase project URL"
+  log_info "  - SUPABASE_KEY: Supabase anon key"
+  log_info "  - SPEECH_KEY: Azure Speech Service key"
+  log_info "  - VOICE_KEY: Azure Voice Service key"
+  log_info "  - AZURE_OPENAI_API_KEY: Azure OpenAI API key"
+  log_info "  - WHATSAPP_ACCESS_TOKEN: Meta WhatsApp access token"
+  log_info ""
   
   # Upload all secrets
   upload_secrets "$keyvault_name"
@@ -145,7 +205,9 @@ main() {
   # Grant Container App access (if exists)
   grant_container_app_access "$keyvault_name"
   
-  log_success "Key Vault setup completed successfully"
+  log_info "=========================================="
+  log_success "Key Vault setup completed successfully!"
+  log_info "=========================================="
   log_info "Key Vault Name: $keyvault_name"
   log_info "Key Vault URI: https://${keyvault_name}.vault.azure.net/"
 }
