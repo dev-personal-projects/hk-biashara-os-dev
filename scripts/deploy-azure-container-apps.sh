@@ -708,42 +708,13 @@ deploy_container_app() {
   fi
 
   log_step "Configuring Container App environment variables and resources..."
-  local aspnetcore_env="Production"
-  if [[ "$ENVIRONMENT_PREFIX" == "dev" ]]; then
-    aspnetcore_env="Development"
-  elif [[ "$ENVIRONMENT_PREFIX" == "staging" ]]; then
-    aspnetcore_env="Staging"
-  fi
   
-  if az containerapp update \
-    --name "$container_app_name" \
-    --resource-group "$PROJECT_RESOURCE_GROUP" \
-    --cpu 0.25 \
-    --memory 0.5Gi \
-    --min-replicas 1 \
-    --max-replicas 10 \
-    --set-env-vars "KeyVaultName=$keyvault_name" \
-                    "ASPNETCORE_ENVIRONMENT=$aspnetcore_env" \
-                    "ASPNETCORE_HTTP_PORTS=$target_port" \
-                    "ASPNETCORE_URLS=http://+:$target_port" \
-    --output none 2>/dev/null; then
-    log_success "Container app configuration updated successfully"
-    log_info "  Environment: $aspnetcore_env"
-    log_info "  HTTP Port: $target_port"
-    log_info "  URLs: http://+:$target_port"
-  else
-    log_warning "Failed to update container app configuration (may already be configured)"
-  fi
-
-  log_step "Granting Container App access to Key Vault..."
-  
-  # Try to find Key Vault - first try exact name, then try pattern matching
+  # Find the actual Key Vault name (may differ from expected pattern)
   local actual_keyvault_name="$keyvault_name"
   if ! az keyvault show --name "$keyvault_name" --resource-group "$PROJECT_RESOURCE_GROUP" --output none &>/dev/null; then
     log_info "Key Vault '$keyvault_name' not found. Searching for Key Vaults matching pattern..."
     
     # Try to find Key Vault with similar name pattern (e.g., dev-bos-kv, dev-bs-kv)
-    local kv_pattern="${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}*-kv"
     local found_kv
     found_kv=$(az keyvault list \
       --resource-group "$PROJECT_RESOURCE_GROUP" \
@@ -751,17 +722,75 @@ deploy_container_app() {
     
     if [[ -n "$found_kv" ]]; then
       actual_keyvault_name="$found_kv"
-      log_info "Found existing Key Vault: $actual_keyvault_name"
-      log_info "Using this Key Vault for access grant."
+      log_info "Found existing Key Vault: $actual_keyvault_name (using instead of $keyvault_name)"
     else
-      log_warning "No Key Vault found matching pattern '$kv_pattern' in resource group '$PROJECT_RESOURCE_GROUP'."
-      log_info "Key Vault '$keyvault_name' does not exist yet."
-      log_info "Run './scripts/setup-keyvault.sh' to create it and upload secrets."
-      log_info "After creating the Key Vault, you can rerun this deployment script to grant access."
-      return 0
+      log_warning "No Key Vault found. Container app will be configured without KeyVaultName."
+      log_warning "The application may fail to start if it requires Key Vault secrets."
+      actual_keyvault_name=""
     fi
   else
     log_info "Found Key Vault: $actual_keyvault_name"
+  fi
+  
+  local aspnetcore_env="Production"
+  if [[ "$ENVIRONMENT_PREFIX" == "dev" ]]; then
+    aspnetcore_env="Development"
+  elif [[ "$ENVIRONMENT_PREFIX" == "staging" ]]; then
+    aspnetcore_env="Staging"
+  fi
+  
+  # Build environment variables - only include KeyVaultName if we found one
+  if [[ -n "$actual_keyvault_name" ]]; then
+    if az containerapp update \
+      --name "$container_app_name" \
+      --resource-group "$PROJECT_RESOURCE_GROUP" \
+      --cpu 0.25 \
+      --memory 0.5Gi \
+      --min-replicas 1 \
+      --max-replicas 10 \
+      --set-env-vars "KeyVaultName=$actual_keyvault_name" \
+                      "ASPNETCORE_ENVIRONMENT=$aspnetcore_env" \
+                      "ASPNETCORE_HTTP_PORTS=$target_port" \
+                      "ASPNETCORE_URLS=http://+:$target_port" \
+      --output none 2>/dev/null; then
+      log_success "Container app configuration updated successfully"
+      log_info "  Environment: $aspnetcore_env"
+      log_info "  HTTP Port: $target_port"
+      log_info "  URLs: http://+:$target_port"
+      log_info "  Key Vault: $actual_keyvault_name"
+    else
+      log_warning "Failed to update container app configuration (may already be configured)"
+    fi
+  else
+    # Update without KeyVaultName
+    if az containerapp update \
+      --name "$container_app_name" \
+      --resource-group "$PROJECT_RESOURCE_GROUP" \
+      --cpu 0.25 \
+      --memory 0.5Gi \
+      --min-replicas 1 \
+      --max-replicas 10 \
+      --set-env-vars "ASPNETCORE_ENVIRONMENT=$aspnetcore_env" \
+                      "ASPNETCORE_HTTP_PORTS=$target_port" \
+                      "ASPNETCORE_URLS=http://+:$target_port" \
+      --output none 2>/dev/null; then
+      log_success "Container app configuration updated successfully"
+      log_info "  Environment: $aspnetcore_env"
+      log_info "  HTTP Port: $target_port"
+      log_info "  URLs: http://+:$target_port"
+      log_warning "  Key Vault: Not configured (no Key Vault found)"
+    else
+      log_warning "Failed to update container app configuration (may already be configured)"
+    fi
+  fi
+
+  log_step "Granting Container App access to Key Vault..."
+  
+  # Use the actual Key Vault name we found
+  if [[ -z "$actual_keyvault_name" ]]; then
+    log_warning "No Key Vault found. Skipping access grant."
+    log_info "Run './scripts/setup-keyvault.sh' to create a Key Vault and upload secrets."
+    return 0
   fi
   
   # Get Container App's managed identity principal ID
